@@ -1,4 +1,4 @@
--- 월 택배비 수정 화면에서 쓰는 집계 함수
+-- 월 택배운임 수정 화면에서 쓰는 집계 함수
 -- schema.sql 실행 후 Supabase SQL Editor에서 추가로 실행하세요.
 
 create or replace function batch_line_summary(

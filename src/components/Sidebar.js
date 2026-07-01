@@ -6,7 +6,7 @@ import ThemeToggle from './ThemeToggle'
 
 const NAV_ITEMS = [
   { href: '/', label: '대시보드', icon: DashboardIcon },
-  { href: '/monthly-fees', label: '월 택배비 수정', icon: TruckIcon },
+  { href: '/monthly-fees', label: '월 택배운임 수정', icon: TruckIcon },
   { href: '/shippers', label: '화주사 관리', icon: BuildingIcon },
 ]
 

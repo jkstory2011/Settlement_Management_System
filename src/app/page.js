@@ -82,7 +82,7 @@ export default function HomePage() {
           <div className="mb-6 grid gap-4 sm:grid-cols-2">
             <NavCard
               href="/monthly-fees"
-              title="월 택배비 수정"
+              title="월 택배운임 수정"
               desc="CJ대한통운 등 월별 원본 내역서 업로드 및 화주사별 정산 금액 검토/수정"
             />
             <NavCard href="/shippers" title="화주사 관리" desc="정식 계약 화주사 마스터 및 구간별 계약 단가표 관리" />

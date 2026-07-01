@@ -66,7 +66,7 @@ export default function MonthlyFeesPage() {
 
   return (
     <main>
-      <PageHeader eyebrow="Settlement Console" title="월 택배비 수정" backHref="/" backLabel="홈으로" />
+      <PageHeader eyebrow="Settlement Console" title="월 택배운임 수정" backHref="/" backLabel="홈으로" />
 
       <Card className="mb-6 p-4">
         <form onSubmit={handleUpload} className="flex flex-wrap items-end gap-3">

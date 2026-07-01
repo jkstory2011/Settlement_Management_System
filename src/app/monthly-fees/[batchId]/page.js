@@ -143,7 +143,7 @@ export default function BatchDetailPage() {
     <main>
       <PageHeader
         eyebrow="Settlement Console"
-        title="월 택배비 수정"
+        title="월 택배운임 수정"
         backHref="/monthly-fees"
         actions={
           <Button
