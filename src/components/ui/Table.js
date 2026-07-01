@@ -16,8 +16,12 @@ export function THead({ children }) {
   )
 }
 
-export function Th({ className = '', children }) {
-  return <th className={`px-4 py-2.5 font-medium ${className}`}>{children}</th>
+export function Th({ className = '', children, ...props }) {
+  return (
+    <th className={`whitespace-nowrap px-4 py-2.5 font-medium ${className}`} {...props}>
+      {children}
+    </th>
+  )
 }
 
 export function TBody({ children }) {
@@ -34,7 +38,7 @@ export function Tr({ className = '', children, ...props }) {
 
 export function Td({ className = '', children, ...props }) {
   return (
-    <td className={`px-4 py-2.5 text-slate-700 dark:text-slate-300 ${className}`} {...props}>
+    <td className={`whitespace-nowrap px-4 py-2.5 text-slate-700 dark:text-slate-300 ${className}`} {...props}>
       {children}
     </td>
   )

@@ -26,11 +26,11 @@ export async function POST(request, { params }) {
     if (error) return NextResponse.json({ error: error.message }, { status: 500 })
 
     const row = data?.[0]
-    if (!row || row.updated_count === 0) break
+    if (!row || row.scanned_count === 0) break
 
     total += row.updated_count
     afterId = row.last_id
-    if (row.updated_count < CHUNK_SIZE) break
+    if (row.scanned_count < CHUNK_SIZE) break
   }
 
   try {

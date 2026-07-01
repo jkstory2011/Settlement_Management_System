@@ -59,7 +59,12 @@ export default function ShippersPage() {
 
   async function remove(shipper) {
     if (!confirm(`${shipper.name} 화주사를 삭제할까요? 등록된 구간표도 함께 삭제됩니다.`)) return
-    await fetch(`/api/shippers/${shipper.id}`, { method: 'DELETE' })
+    const res = await fetch(`/api/shippers/${shipper.id}`, { method: 'DELETE' })
+    if (!res.ok) {
+      const json = await res.json().catch(() => ({}))
+      alert(json.error || '삭제 실패')
+      return
+    }
     load()
   }
 

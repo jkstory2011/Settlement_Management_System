@@ -92,8 +92,12 @@ create table if not exists invoice_lines (
   base_fee numeric not null default 0,
   other_fee numeric not null default 0,
   total_fee numeric not null default 0,
-  shipper_id bigint references shippers(id),
+  -- 화주사가 삭제되면 해당 운송장은 미등록 상태로 되돌아감
+  shipper_id bigint references shippers(id) on delete set null,
   applied_amount numeric not null default 0,
+  -- true면 화주사가 수동으로 확정된 건(예: 반품 품목명 매칭으로 예외 배정) -- 재계산이
+  -- shipper_name_candidate 이름매칭으로 shipper_id를 덮어쓰지 않음
+  shipper_manual boolean not null default false,
   is_manual_edit boolean not null default false,
   manual_amount numeric,
   final_amount numeric generated always as (coalesce(manual_amount, applied_amount)) stored,
@@ -124,7 +128,7 @@ create index if not exists idx_invoice_lines_batch_type_no on invoice_lines(batc
 create table if not exists batch_shipper_summary (
   batch_id bigint not null references monthly_batches(id) on delete cascade,
   group_key text not null, -- 'shipper:<id>' | 'unregistered' | 'sender:<name>'
-  shipper_id bigint references shippers(id),
+  shipper_id bigint references shippers(id) on delete set null,
   shipper_name text not null,
   sender_name text, -- 반복 발송된 미등록 화주사 후보 그룹에서만 값이 채워짐
   line_count bigint not null default 0,

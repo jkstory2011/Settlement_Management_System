@@ -25,7 +25,7 @@ export default function RootLayout({ children }) {
         <div className="flex min-h-screen">
           <Sidebar />
           <div className="flex-1 overflow-y-auto">
-            <div className="mx-auto max-w-6xl px-6 py-8">{children}</div>
+            <div className="mx-auto max-w-[1600px] px-6 py-8">{children}</div>
           </div>
         </div>
       </body>

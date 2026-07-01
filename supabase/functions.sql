@@ -291,13 +291,22 @@ end;
 $$;
 
 -- 업로드 이후 화주사 마스터/구간표가 바뀐 경우, 해당 배치의 shipper_id/applied_amount를 서버에서 일괄 재계산
--- (수동 수정된 manual_amount는 건드리지 않음)
+-- (수동 수정된 manual_amount는 건드리지 않음. shipper_manual=true인 건도 shipper_id는 그대로 두되
+--  그 화주사 기준 단가로 applied_amount는 갱신함 -- 반품 품목명 매칭 등 이름매칭 밖에서 예외적으로
+--  확정한 화주사 배정이 재계산 때마다 되돌아가는 문제가 있었음)
 -- 21만 건을 한 statement로 처리하면 statement_timeout(약 8초)에 걸리므로 청크 단위로 처리한다.
 -- p_after_id 이후 id 기준으로 p_limit개만 처리하고, 다음 호출에 쓸 last_id와 처리 건수를 반환한다.
+-- 값이 실제로 바뀐 행만 UPDATE한다 (applied_amount가 바뀌면 STORED 컬럼인 final_amount와 관련 인덱스도
+-- 매번 다시 써야 해서, 대부분 그대로인 21만 건을 매번 전부 쓰면 청크당 4~6초씩 걸림을 확인함).
+-- scanned_count는 이번 청크에서 훑은(=페이지네이션 커서 판단용) 건수, updated_count는 실제 변경된 건수.
 create or replace function recompute_batch_applied_amounts_chunk(p_batch_id bigint, p_after_id bigint, p_limit integer default 20000)
-returns table (last_id bigint, updated_count integer)
+returns table (last_id bigint, scanned_count integer, updated_count integer)
 language plpgsql
 as $$
+declare
+  v_last_id bigint;
+  v_scanned integer;
+  v_updated integer;
 begin
   create temporary table if not exists tmp_shipper_names (
     shipper_id bigint,
@@ -315,40 +324,48 @@ begin
     where s.is_active;
   end if;
 
-  return query
-  with chunk as (
-    select il.id, il.base_fee, il.other_fee, il.total_fee, il.shipper_name_candidate
+  create temporary table if not exists tmp_recompute_chunk (
+    id bigint primary key,
+    shipper_id bigint,
+    new_applied_amount numeric
+  ) on commit drop;
+  truncate tmp_recompute_chunk;
+
+  insert into tmp_recompute_chunk (id, shipper_id, new_applied_amount)
+  select
+    c.id,
+    case when c.shipper_manual then c.cur_shipper_id else sn.shipper_id end as final_shipper_id,
+    coalesce(t.contract_price + c.other_fee, c.total_fee)
+  from (
+    select il.id, il.base_fee, il.other_fee, il.total_fee, il.shipper_name_candidate,
+           il.shipper_manual, il.shipper_id as cur_shipper_id
     from invoice_lines il
     where il.batch_id = p_batch_id
       and il.id > p_after_id
     order by il.id
     limit p_limit
-  ),
-  computed as (
-    select
-      c.id as line_id,
-      sn.shipper_id,
-      coalesce(t.contract_price + c.other_fee, c.total_fee) as new_applied_amount
-    from chunk c
-    left join tmp_shipper_names sn on sn.norm_name = lower(trim(c.shipper_name_candidate))
-    left join lateral (
-      select srt.contract_price
-      from shipper_rate_tiers srt
-      where srt.shipper_id = sn.shipper_id
-        and srt.cj_base_fee = c.base_fee
-      order by srt.effective_from desc
-      limit 1
-    ) t on sn.shipper_id is not null
-  ),
-  upd as (
-    update invoice_lines il
-    set shipper_id = comp.shipper_id,
-        applied_amount = comp.new_applied_amount
-    from computed comp
-    where il.id = comp.line_id
-    returning il.id
-  )
-  select max(upd.id), count(*)::integer from upd;
+  ) c
+  left join tmp_shipper_names sn on sn.norm_name = lower(trim(c.shipper_name_candidate))
+  left join lateral (
+    select srt.contract_price
+    from shipper_rate_tiers srt
+    where srt.shipper_id = case when c.shipper_manual then c.cur_shipper_id else sn.shipper_id end
+      and srt.cj_base_fee = c.base_fee
+    order by srt.effective_from desc
+    limit 1
+  ) t on (case when c.shipper_manual then c.cur_shipper_id else sn.shipper_id end) is not null;
+
+  select max(id), count(*) into v_last_id, v_scanned from tmp_recompute_chunk;
+
+  update invoice_lines il
+  set shipper_id = tmp.shipper_id,
+      applied_amount = tmp.new_applied_amount
+  from tmp_recompute_chunk tmp
+  where il.id = tmp.id
+    and (il.shipper_id is distinct from tmp.shipper_id or il.applied_amount is distinct from tmp.new_applied_amount);
+  get diagnostics v_updated = row_count;
+
+  return query select v_last_id, v_scanned, v_updated;
 end;
 $$;
 
@@ -577,5 +594,60 @@ begin
     total_final = excluded.total_final;
 
   return v_count;
+end;
+$$;
+
+-- 송화인/받는분을 직접 수정한 뒤 호출: shipper_name_candidate(생성컬럼)가 바뀐 이름을 반영하면
+-- 등록된 화주사명/별칭과 다시 매칭해서 shipper_id/applied_amount를 재계산한다.
+-- 매칭 안 되면 미등록(shipper_id=null)으로 남는다. 캐시 재집계는 호출부(API)에서 refreshBatchAggregates로 처리.
+create or replace function update_lines_and_reassign(
+  p_line_ids bigint[],
+  p_sender_name text,
+  p_receiver_name text,
+  p_update_sender boolean,
+  p_update_receiver boolean
+)
+returns table (updated_count integer, matched_count integer)
+language plpgsql
+as $$
+declare
+  v_updated integer;
+  v_matched integer;
+begin
+  update invoice_lines il
+  set sender_name = case when p_update_sender then p_sender_name else il.sender_name end,
+      receiver_name = case when p_update_receiver then p_receiver_name else il.receiver_name end
+  where il.id = any(p_line_ids);
+  get diagnostics v_updated = row_count;
+
+  with names as (
+    select s.id as shipper_id, lower(trim(s.name)) as norm_name from shippers s where s.is_active
+    union
+    select s.id, lower(trim(a)) from shippers s, unnest(s.alias) a where s.is_active
+  ),
+  computed as (
+    select il.id as line_id, n.shipper_id,
+      coalesce(t.contract_price + il.other_fee, il.total_fee) as new_applied_amount
+    from invoice_lines il
+    left join names n on n.norm_name = lower(trim(il.shipper_name_candidate))
+    left join lateral (
+      select srt.contract_price from shipper_rate_tiers srt
+      where srt.shipper_id = n.shipper_id and srt.cj_base_fee = il.base_fee
+      order by srt.effective_from desc limit 1
+    ) t on n.shipper_id is not null
+    where il.id = any(p_line_ids)
+  ),
+  upd as (
+    update invoice_lines il
+    set shipper_id = c.shipper_id,
+        applied_amount = c.new_applied_amount,
+        shipper_manual = false
+    from computed c
+    where il.id = c.line_id
+    returning c.shipper_id
+  )
+  select count(*) filter (where shipper_id is not null) into v_matched from upd;
+
+  return query select v_updated, coalesce(v_matched, 0);
 end;
 $$;
