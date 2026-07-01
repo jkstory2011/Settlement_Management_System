@@ -370,3 +370,69 @@ begin
   return v_count;
 end;
 $$;
+
+-- assign_shipper_to_candidate / merge-candidate 로 잘못 병합한 경우 되돌리기.
+-- 해당 화주사에서 그 이름(candidate_name)에 해당하는 행만 다시 미등록으로 되돌린다.
+-- alias 제거 여부는 호출부에서 별도 처리(이 함수는 invoice_lines/캐시만 되돌림).
+create or replace function unassign_shipper_candidate(p_batch_id bigint, p_shipper_id bigint, p_candidate_name text)
+returns integer
+language plpgsql
+as $$
+declare
+  v_count integer;
+  v_old_appl numeric;
+  v_old_final numeric;
+  v_new_orig numeric;
+  v_new_final numeric;
+begin
+  select coalesce(sum(applied_amount), 0), coalesce(sum(final_amount), 0), count(*)
+  into v_old_appl, v_old_final, v_count
+  from invoice_lines
+  where batch_id = p_batch_id and shipper_id = p_shipper_id and shipper_name_candidate = p_candidate_name;
+
+  if v_count = 0 then
+    return 0;
+  end if;
+
+  with upd as (
+    update invoice_lines
+    set shipper_id = null,
+        applied_amount = total_fee
+    where batch_id = p_batch_id and shipper_id = p_shipper_id and shipper_name_candidate = p_candidate_name
+    returning total_fee, final_amount
+  )
+  select coalesce(sum(total_fee), 0), coalesce(sum(final_amount), 0)
+  into v_new_orig, v_new_final
+  from upd;
+
+  update batch_shipper_summary
+  set line_count = line_count - v_count,
+      total_original = total_original - v_new_orig,
+      total_applied = total_applied - v_old_appl,
+      total_final = total_final - v_old_final
+  where batch_id = p_batch_id and group_key = 'shipper:' || p_shipper_id::text;
+
+  update monthly_batches
+  set total_applied = total_applied + (v_new_orig - v_old_appl),
+      total_final = total_final + (v_new_final - v_old_final)
+  where monthly_batches.id = p_batch_id;
+
+  update batch_shipper_summary
+  set line_count = line_count + v_count,
+      total_original = total_original + v_new_orig,
+      total_applied = total_applied + v_new_orig,
+      total_final = total_final + v_new_final
+  where batch_id = p_batch_id and group_key = 'unregistered';
+
+  insert into batch_shipper_summary
+    (batch_id, group_key, shipper_id, shipper_name, sender_name, line_count, total_original, total_applied, total_final)
+  values (p_batch_id, 'sender:' || p_candidate_name, null, p_candidate_name, p_candidate_name, v_count, v_new_orig, v_new_orig, v_new_final)
+  on conflict (batch_id, group_key) do update set
+    line_count = excluded.line_count,
+    total_original = excluded.total_original,
+    total_applied = excluded.total_applied,
+    total_final = excluded.total_final;
+
+  return v_count;
+end;
+$$;
