@@ -64,6 +64,9 @@ export default function MonthlyFeesPage() {
     }
   }
 
+  const selectedCarrier = carriers.find((c) => String(c.id) === String(carrierId))
+  const isConfigured = selectedCarrier && Object.keys(selectedCarrier.format_config?.columns || {}).length > 0
+
   return (
     <main>
       <PageHeader eyebrow="Settlement Console" title="월 택배운임 수정" backHref="/" backLabel="홈으로" />
@@ -80,6 +83,15 @@ export default function MonthlyFeesPage() {
               ))}
             </Select>
           </div>
+          {selectedCarrier && !isConfigured && (
+            <p className="w-full text-sm text-amber-600 dark:text-amber-400">
+              {selectedCarrier.name}의 양식이 아직 등록되지 않았습니다.{' '}
+              <Link href={`/carriers/${selectedCarrier.id}`} className="underline">
+                여기서 먼저 설정하세요
+              </Link>
+              .
+            </p>
+          )}
           <div>
             <Label>대상 월</Label>
             <Input type="month" value={yearMonth} onChange={(e) => setYearMonth(e.target.value)} />
@@ -93,7 +105,7 @@ export default function MonthlyFeesPage() {
               onChange={(e) => setFile(e.target.files?.[0] || null)}
             />
           </div>
-          <Button type="submit" disabled={uploading}>
+          <Button type="submit" disabled={uploading || !isConfigured}>
             {uploading ? '처리 중...' : '업로드'}
           </Button>
           {progress && <p className="w-full text-sm text-slate-500 dark:text-slate-400">{progress}</p>}

@@ -1,10 +1,7 @@
 import * as XLSX from 'xlsx'
 
-// CJ대한통운 월별 내역서 포맷
-// 1~2행: 2단 헤더, 3행부터 데이터
-// No, 집화일자, 집화점소, 운송장번호, 송화인(고객명/전화번호/주소), 받는분(고객명/전화번호/주소),
-// 품목명, 수량, 예약구분, 운임구분, 기본운임, 기타운임, 총운임, 인수자, 배송일자, 배송점소
-const COLUMNS = [
+// invoice_lines에 저장되는 필드 목록. 택배사별 format_config.columns가 이 이름들을 열 번호에 매핑한다.
+export const INVOICE_FIELDS = [
   'no',
   'pickup_date',
   'pickup_branch',
@@ -27,34 +24,49 @@ const COLUMNS = [
   'delivery_branch',
 ]
 
+const DATE_FIELDS = new Set(['pickup_date', 'delivery_date'])
+
 /**
- * CJ대한통운 내역서 버퍼를 파싱해 행 객체 배열로 반환한다.
+ * 택배사별 format_config(header_rows, sheet_index, columns)를 기준으로 내역서 버퍼를 파싱한다.
  * @param {Buffer} buffer
+ * @param {{ sheet_index?: number, header_rows: number, columns: Record<string, number> }} formatConfig
  * @returns {object[]}
  */
-export function parseCjInvoiceBuffer(buffer) {
+export function parseInvoiceBuffer(buffer, formatConfig) {
+  if (!formatConfig || !formatConfig.columns || Object.keys(formatConfig.columns).length === 0) {
+    throw new Error('이 택배사의 양식(컬럼 매핑)이 아직 등록되지 않았습니다. 택배사 양식 관리에서 먼저 설정하세요.')
+  }
+
+  const headerRows = formatConfig.header_rows ?? 2
+  const sheetIndex = formatConfig.sheet_index ?? 0
+  const columns = formatConfig.columns
+
   const workbook = XLSX.read(buffer, { type: 'buffer', cellDates: false })
-  const sheet = workbook.Sheets[workbook.SheetNames[0]]
+  const sheetName = workbook.SheetNames[sheetIndex]
+  if (!sheetName) throw new Error(`시트 ${sheetIndex}번을 찾을 수 없습니다.`)
+  const sheet = workbook.Sheets[sheetName]
   const rows = XLSX.utils.sheet_to_json(sheet, { header: 1, raw: true, defval: null })
 
-  const dataRows = rows.slice(2) // 1~2행(헤더) 제외
+  const dataRows = rows.slice(headerRows)
   const result = []
 
   for (const row of dataRows) {
     if (!row || row.every((v) => v === null || v === '')) continue
 
     const record = {}
-    COLUMNS.forEach((key, idx) => {
-      record[key] = row[idx] ?? null
-    })
+    for (const field of INVOICE_FIELDS) {
+      const colIdx = columns[field]
+      record[field] = colIdx == null ? null : (row[colIdx] ?? null)
+    }
 
     record.no = record.no != null ? Number(record.no) : null
     record.qty = record.qty != null ? Number(record.qty) : null
     record.base_fee = Number(record.base_fee) || 0
     record.other_fee = Number(record.other_fee) || 0
     record.total_fee = Number(record.total_fee) || 0
-    record.pickup_date = normalizeDate(record.pickup_date)
-    record.delivery_date = normalizeDate(record.delivery_date)
+    for (const field of DATE_FIELDS) {
+      record[field] = normalizeDate(record[field])
+    }
 
     result.push(record)
   }

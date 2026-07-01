@@ -7,6 +7,7 @@ import ThemeToggle from './ThemeToggle'
 const NAV_ITEMS = [
   { href: '/', label: '대시보드', icon: DashboardIcon },
   { href: '/monthly-fees', label: '월 택배운임 수정', icon: TruckIcon },
+  { href: '/carriers', label: '택배사 양식 관리', icon: SlidersIcon },
   { href: '/shippers', label: '화주사 관리', icon: BuildingIcon },
 ]
 
@@ -64,6 +65,17 @@ function TruckIcon(props) {
       <path d="M11 8h4l3 3v2h-7z" strokeLinejoin="round" />
       <circle cx="6" cy="15" r="1.6" />
       <circle cx="15" cy="15" r="1.6" />
+    </svg>
+  )
+}
+
+function SlidersIcon(props) {
+  return (
+    <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.6" {...props}>
+      <path d="M4 5h12M4 10h12M4 15h12" strokeLinecap="round" />
+      <circle cx="8" cy="5" r="1.6" />
+      <circle cx="14" cy="10" r="1.6" />
+      <circle cx="7" cy="15" r="1.6" />
     </svg>
   )
 }

@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server'
 import { getSupabaseAdmin } from '@/lib/supabase-server'
-import { parseCjInvoiceBuffer } from '@/lib/xlsx-parse'
+import { parseInvoiceBuffer } from '@/lib/xlsx-parse'
 import {
   buildShipperIndex,
   buildTierIndex,
@@ -49,12 +49,19 @@ export async function POST(request) {
     if (batchError) throw batchError
     batchId = batch.id
 
+    const { data: carrier, error: carrierError } = await supabase
+      .from('carriers')
+      .select('format_config')
+      .eq('id', carrierId)
+      .single()
+    if (carrierError) throw carrierError
+
     // 재업로드 대비 기존 라인 삭제
     const { error: deleteError } = await supabase.from('invoice_lines').delete().eq('batch_id', batchId)
     if (deleteError) throw deleteError
 
     const buffer = Buffer.from(await file.arrayBuffer())
-    const records = parseCjInvoiceBuffer(buffer)
+    const records = parseInvoiceBuffer(buffer, carrier.format_config)
 
     const [{ data: shippers, error: shipperError }, { data: tiers, error: tierError }] = await Promise.all([
       supabase.from('shippers').select('id, name, alias, is_active'),

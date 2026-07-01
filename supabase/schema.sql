@@ -4,11 +4,32 @@
 create table if not exists carriers (
   id bigint generated always as identity primary key,
   name text not null unique,
+  -- { sheet_index, header_rows, columns: { invoice_lines 필드명 -> 원본 엑셀 컬럼 번호(0부터) } }
+  -- columns가 비어있으면 아직 양식이 등록되지 않은 것으로 간주하고 업로드를 막는다.
+  format_config jsonb not null default '{}'::jsonb,
   created_at timestamptz not null default now()
 );
 
+insert into carriers (name, format_config)
+values (
+  'CJ대한통운',
+  '{
+    "sheet_index": 0,
+    "header_rows": 2,
+    "columns": {
+      "no": 0, "pickup_date": 1, "pickup_branch": 2, "tracking_no": 3,
+      "sender_name": 4, "sender_phone": 5, "sender_addr": 6,
+      "receiver_name": 7, "receiver_phone": 8, "receiver_addr": 9,
+      "item_name": 10, "qty": 11, "reservation_type": 12, "freight_type": 13,
+      "base_fee": 14, "other_fee": 15, "total_fee": 16,
+      "receiver_signee": 17, "delivery_date": 18, "delivery_branch": 19
+    }
+  }'::jsonb
+)
+on conflict (name) do nothing;
+
 insert into carriers (name)
-values ('CJ대한통운')
+values ('한진택배'), ('롯데택배'), ('경동택배')
 on conflict (name) do nothing;
 
 create table if not exists shippers (
