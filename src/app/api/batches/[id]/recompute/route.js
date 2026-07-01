@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server'
 import { getSupabaseAdmin } from '@/lib/supabase-server'
+import { refreshBatchAggregates } from '@/lib/refresh-aggregates'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -30,6 +31,12 @@ export async function POST(request, { params }) {
     total += row.updated_count
     afterId = row.last_id
     if (row.updated_count < CHUNK_SIZE) break
+  }
+
+  try {
+    await refreshBatchAggregates(supabase, batchId)
+  } catch (error) {
+    return NextResponse.json({ error: String(error.message || error) }, { status: 500 })
   }
 
   return NextResponse.json({ updated: total })

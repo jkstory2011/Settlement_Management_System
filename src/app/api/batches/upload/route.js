@@ -8,6 +8,7 @@ import {
   computeAppliedAmount,
   getShipperNameCandidate,
 } from '@/lib/shipper-match'
+import { refreshBatchAggregates } from '@/lib/refresh-aggregates'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -121,6 +122,8 @@ export async function POST(request) {
       .from('monthly_batches')
       .update({ status: 'done', total_rows: rows.length })
       .eq('id', batchId)
+
+    await refreshBatchAggregates(supabase, batchId)
 
     return NextResponse.json({ batchId, totalRows: rows.length })
   } catch (error) {
