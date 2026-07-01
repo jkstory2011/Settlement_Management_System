@@ -290,3 +290,83 @@ begin
   select max(upd.id), count(*)::integer from upd;
 end;
 $$;
+
+-- "화주사로 등록" 버튼 전용: 방금 등록한 화주사 이름(candidate_name)에 해당하는 행만 이관한다.
+-- 전체 재계산(recompute_batch_applied_amounts_chunk)은 화주사/단가표가 광범위하게 바뀔 때 쓰는 것이고,
+-- 신규 화주사 1명 등록은 그 이름에 해당하는 행(보통 수천 건)만 건드리면 되므로 21만 건 전체를 훑을 필요가 없다.
+create or replace function assign_shipper_to_candidate(p_batch_id bigint, p_shipper_id bigint, p_candidate_name text)
+returns integer
+language plpgsql
+as $$
+declare
+  v_old_orig numeric;
+  v_old_appl numeric;
+  v_old_final numeric;
+  v_new_appl numeric;
+  v_new_final numeric;
+  v_count integer;
+begin
+  select coalesce(sum(total_fee), 0), coalesce(sum(applied_amount), 0), coalesce(sum(final_amount), 0), count(*)
+  into v_old_orig, v_old_appl, v_old_final, v_count
+  from invoice_lines
+  where batch_id = p_batch_id and shipper_id is null and shipper_name_candidate = p_candidate_name;
+
+  if v_count = 0 then
+    return 0;
+  end if;
+
+  with computed as (
+    select il.id, coalesce(t.contract_price + il.other_fee, il.total_fee) as new_applied
+    from invoice_lines il
+    left join lateral (
+      select srt.contract_price
+      from shipper_rate_tiers srt
+      where srt.shipper_id = p_shipper_id and srt.cj_base_fee = il.base_fee
+      order by srt.effective_from desc
+      limit 1
+    ) t on true
+    where il.batch_id = p_batch_id
+      and il.shipper_id is null
+      and il.shipper_name_candidate = p_candidate_name
+  ),
+  upd as (
+    update invoice_lines il
+    set shipper_id = p_shipper_id,
+        applied_amount = c.new_applied
+    from computed c
+    where il.id = c.id
+    returning il.applied_amount, il.final_amount
+  )
+  select coalesce(sum(applied_amount), 0), coalesce(sum(final_amount), 0)
+  into v_new_appl, v_new_final
+  from upd;
+
+  update monthly_batches
+  set total_applied = total_applied + (v_new_appl - v_old_appl),
+      total_final = total_final + (v_new_final - v_old_final)
+  where monthly_batches.id = p_batch_id;
+
+  update batch_shipper_summary
+  set line_count = line_count - v_count,
+      total_original = total_original - v_old_orig,
+      total_applied = total_applied - v_old_appl,
+      total_final = total_final - v_old_final
+  where batch_id = p_batch_id and group_key = 'unregistered';
+
+  delete from batch_shipper_summary
+  where batch_id = p_batch_id and group_key = 'sender:' || p_candidate_name;
+
+  insert into batch_shipper_summary
+    (batch_id, group_key, shipper_id, shipper_name, sender_name, line_count, total_original, total_applied, total_final)
+  select p_batch_id, 'shipper:' || p_shipper_id::text, p_shipper_id, s.name, null, v_count, v_old_orig, v_new_appl, v_new_final
+  from shippers s
+  where s.id = p_shipper_id
+  on conflict (batch_id, group_key) do update set
+    line_count = batch_shipper_summary.line_count + excluded.line_count,
+    total_original = batch_shipper_summary.total_original + excluded.total_original,
+    total_applied = batch_shipper_summary.total_applied + excluded.total_applied,
+    total_final = batch_shipper_summary.total_final + excluded.total_final;
+
+  return v_count;
+end;
+$$;

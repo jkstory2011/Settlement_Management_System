@@ -82,9 +82,13 @@ export default function BatchDetailPage() {
       const json = await res.json()
       if (!res.ok) throw new Error(json.error || '화주사 등록 실패')
 
-      const recomputeRes = await fetch(`/api/batches/${batchId}/recompute`, { method: 'POST' })
-      const recomputeJson = await recomputeRes.json()
-      if (!recomputeRes.ok) throw new Error(recomputeJson.error || '재계산 실패')
+      const assignRes = await fetch(`/api/batches/${batchId}/assign-candidate`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ shipper_id: json.shipper.id, candidate_name: senderName }),
+      })
+      const assignJson = await assignRes.json()
+      if (!assignRes.ok) throw new Error(assignJson.error || '반영 실패')
 
       setFilterKey(`s:${json.shipper.id}`)
       setPage(1)
