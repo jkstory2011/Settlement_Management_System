@@ -4,13 +4,16 @@ import { getSupabaseAdmin } from '@/lib/supabase-server'
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
 
-const PAGE_SIZE = 50
+const DEFAULT_PAGE_SIZE = 50
+const ALLOWED_PAGE_SIZES = [50, 100, 500, 1000]
 
 export async function GET(request, { params }) {
   const supabase = getSupabaseAdmin()
   const batchId = Number(params.id)
   const { searchParams } = new URL(request.url)
   const page = Number(searchParams.get('page') || '1')
+  const requestedPageSize = Number(searchParams.get('pageSize'))
+  const PAGE_SIZE = ALLOWED_PAGE_SIZES.includes(requestedPageSize) ? requestedPageSize : DEFAULT_PAGE_SIZE
   const shipperParam = searchParams.get('shipper_id') // 'unregistered' | shipper id | null(전체)
   const senderName = searchParams.get('sender_name') // 반복 발송된 미등록 화주사 후보 그룹 필터 (shipper_name_candidate 기준)
   const type = searchParams.get('type') // '일반' | '반품' | null(전체)

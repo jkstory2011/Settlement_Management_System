@@ -10,6 +10,8 @@ import { Input } from '@/components/ui/Input'
 import { Table, THead, Th, TBody, Tr, Td, EmptyRow } from '@/components/ui/Table'
 
 const LINES_COL_STORAGE_KEY = 'monthly-fees-lines-col-widths'
+const PAGE_SIZE_STORAGE_KEY = 'monthly-fees-lines-page-size'
+const PAGE_SIZE_OPTIONS = [50, 100, 500, 1000]
 const DEFAULT_COL_WIDTHS = {
   select: 36,
   pickup_date: 100,
@@ -104,7 +106,18 @@ export default function BatchDetailPage() {
   const [bulkSenderInput, setBulkSenderInput] = useState('')
   const [bulkReceiverInput, setBulkReceiverInput] = useState('')
   const [bulkSaving, setBulkSaving] = useState(false)
-  const pageSize = 50
+  const [pageSize, setPageSize] = useState(50)
+
+  useEffect(() => {
+    const saved = Number(localStorage.getItem(PAGE_SIZE_STORAGE_KEY))
+    if (PAGE_SIZE_OPTIONS.includes(saved)) setPageSize(saved)
+  }, [])
+
+  function handlePageSizeChange(size) {
+    setPageSize(size)
+    localStorage.setItem(PAGE_SIZE_STORAGE_KEY, String(size))
+    setPage(1)
+  }
 
   useEffect(() => {
     const saved = localStorage.getItem(LINES_COL_STORAGE_KEY)
@@ -254,7 +267,7 @@ export default function BatchDetailPage() {
   async function loadLines() {
     setLoading(true)
     const fParams = filterParams()
-    const params = new URLSearchParams({ page: String(page), ...fParams })
+    const params = new URLSearchParams({ page: String(page), pageSize: String(pageSize), ...fParams })
     if (q) params.set('q', q)
 
     const summaryQuery = new URLSearchParams(fParams).toString()
@@ -279,7 +292,7 @@ export default function BatchDetailPage() {
   useEffect(() => {
     loadLines()
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [batchId, filterKey, typeFilter, packageFilter, q, page])
+  }, [batchId, filterKey, typeFilter, packageFilter, q, page, pageSize])
 
   async function handleRegisterSender(senderName) {
     setRegisteringName(senderName)
@@ -935,6 +948,21 @@ export default function BatchDetailPage() {
               총 {total.toLocaleString()}건 중 {(page - 1) * pageSize + 1}-{Math.min(page * pageSize, total)}
             </span>
             <div className="flex items-center gap-2">
+              <div className="inline-flex rounded-md border border-slate-200 p-0.5 dark:border-slate-800">
+                {PAGE_SIZE_OPTIONS.map((size) => (
+                  <button
+                    key={size}
+                    onClick={() => handlePageSizeChange(size)}
+                    className={`rounded px-2.5 py-1 text-xs transition ${
+                      pageSize === size
+                        ? 'bg-cyan-600 text-white dark:bg-cyan-500 dark:text-slate-950'
+                        : 'text-slate-500 hover:bg-slate-100 dark:text-slate-400 dark:hover:bg-slate-800'
+                    }`}
+                  >
+                    {size}건
+                  </button>
+                ))}
+              </div>
               <Button variant="secondary" disabled={page <= 1} onClick={() => setPage((p) => Math.max(1, p - 1))} className="px-3 py-1">
                 이전
               </Button>

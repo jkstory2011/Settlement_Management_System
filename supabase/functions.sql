@@ -599,7 +599,9 @@ $$;
 
 -- 송화인/받는분을 직접 수정한 뒤 호출: shipper_name_candidate(생성컬럼)가 바뀐 이름을 반영하면
 -- 등록된 화주사명/별칭과 다시 매칭해서 shipper_id/applied_amount를 재계산한다.
--- 매칭 안 되면 미등록(shipper_id=null)으로 남는다. 캐시 재집계는 호출부(API)에서 refreshBatchAggregates로 처리.
+-- 매칭 안 되면 미등록(shipper_id=null)으로 남는다.
+-- batch_shipper_summary/type_summary 캐시도 옛 그룹에서 차감 + 새 그룹에 추가하는 델타 방식으로 즉시
+-- 갱신한다 (전체 재집계는 21만 건 기준 14~17초씩 걸려서, 몇 건짜리 수정에는 맞지 않음을 확인함).
 create or replace function update_lines_and_reassign(
   p_line_ids bigint[],
   p_sender_name text,
@@ -613,7 +615,24 @@ as $$
 declare
   v_updated integer;
   v_matched integer;
+  v_batch_id bigint;
 begin
+  select il.batch_id into v_batch_id from invoice_lines il where il.id = p_line_ids[1];
+
+  create temporary table if not exists tmp_reassign_before (
+    id bigint primary key,
+    shipper_id bigint,
+    shipper_name_candidate text,
+    reservation_type text,
+    total_fee numeric,
+    applied_amount numeric,
+    final_amount numeric
+  ) on commit drop;
+  truncate tmp_reassign_before;
+  insert into tmp_reassign_before
+  select id, shipper_id, shipper_name_candidate, reservation_type, total_fee, applied_amount, final_amount
+  from invoice_lines where id = any(p_line_ids);
+
   update invoice_lines il
   set sender_name = case when p_update_sender then p_sender_name else il.sender_name end,
       receiver_name = case when p_update_receiver then p_receiver_name else il.receiver_name end
@@ -636,17 +655,163 @@ begin
       order by srt.effective_from desc limit 1
     ) t on n.shipper_id is not null
     where il.id = any(p_line_ids)
-  ),
-  upd as (
-    update invoice_lines il
-    set shipper_id = c.shipper_id,
-        applied_amount = c.new_applied_amount,
-        shipper_manual = false
-    from computed c
-    where il.id = c.line_id
-    returning c.shipper_id
   )
-  select count(*) filter (where shipper_id is not null) into v_matched from upd;
+  update invoice_lines il
+  set shipper_id = c.shipper_id,
+      applied_amount = c.new_applied_amount,
+      shipper_manual = false
+  from computed c
+  where il.id = c.line_id;
+
+  select count(*) into v_matched from invoice_lines where id = any(p_line_ids) and shipper_id is not null;
+
+  -- monthly_batches 델타 (수정 대상 라인만 비교하므로 빠름)
+  update monthly_batches mb
+  set total_original = mb.total_original + d.d_orig,
+      total_applied = mb.total_applied + d.d_appl,
+      total_final = mb.total_final + d.d_final
+  from (
+    select
+      coalesce(sum(a.total_fee - b.total_fee), 0) as d_orig,
+      coalesce(sum(a.applied_amount - b.applied_amount), 0) as d_appl,
+      coalesce(sum(a.final_amount - b.final_amount), 0) as d_final
+    from invoice_lines a join tmp_reassign_before b on a.id = b.id
+  ) d
+  where mb.id = v_batch_id;
+
+  -- 1) 옛 그룹(shipper:*/unregistered)에서 차감
+  with old_shipper_groups as (
+    select case when shipper_id is null then 'unregistered' else 'shipper:'||shipper_id::text end as group_key,
+      count(*) as cnt, sum(total_fee) as t_orig, sum(applied_amount) as t_appl, sum(final_amount) as t_final
+    from tmp_reassign_before
+    group by shipper_id
+  )
+  update batch_shipper_summary bss
+  set line_count = bss.line_count - g.cnt,
+      total_original = bss.total_original - g.t_orig,
+      total_applied = bss.total_applied - g.t_appl,
+      total_final = bss.total_final - g.t_final
+  from old_shipper_groups g
+  where bss.batch_id = v_batch_id and bss.group_key = g.group_key;
+
+  -- 2) 옛 그룹(sender:*)에서 차감 (미등록이었던 것만)
+  with old_sender_groups as (
+    select 'sender:'||shipper_name_candidate as group_key,
+      count(*) as cnt, sum(total_fee) as t_orig, sum(applied_amount) as t_appl, sum(final_amount) as t_final
+    from tmp_reassign_before where shipper_id is null
+    group by shipper_name_candidate
+  )
+  update batch_shipper_summary bss
+  set line_count = bss.line_count - g.cnt,
+      total_original = bss.total_original - g.t_orig,
+      total_applied = bss.total_applied - g.t_appl,
+      total_final = bss.total_final - g.t_final
+  from old_sender_groups g
+  where bss.batch_id = v_batch_id and bss.group_key = g.group_key;
+
+  -- 3) 새 그룹(shipper:*/unregistered)에 추가
+  with new_shipper_groups as (
+    select case when shipper_id is null then 'unregistered' else 'shipper:'||shipper_id::text end as group_key,
+      shipper_id,
+      count(*) as cnt, sum(total_fee) as t_orig, sum(applied_amount) as t_appl, sum(final_amount) as t_final
+    from invoice_lines where id = any(p_line_ids)
+    group by shipper_id
+  )
+  insert into batch_shipper_summary (batch_id, group_key, shipper_id, shipper_name, sender_name, line_count, total_original, total_applied, total_final)
+  select v_batch_id, g.group_key, g.shipper_id, coalesce(s.name, '미등록(전체)'), null, g.cnt, g.t_orig, g.t_appl, g.t_final
+  from new_shipper_groups g
+  left join shippers s on s.id = g.shipper_id
+  on conflict (batch_id, group_key) do update set
+    line_count = batch_shipper_summary.line_count + excluded.line_count,
+    total_original = batch_shipper_summary.total_original + excluded.total_original,
+    total_applied = batch_shipper_summary.total_applied + excluded.total_applied,
+    total_final = batch_shipper_summary.total_final + excluded.total_final;
+
+  -- 4) 새 그룹(sender:*)에 추가 (미등록인 것만)
+  with new_sender_groups as (
+    select 'sender:'||shipper_name_candidate as group_key, shipper_name_candidate,
+      count(*) as cnt, sum(total_fee) as t_orig, sum(applied_amount) as t_appl, sum(final_amount) as t_final
+    from invoice_lines where id = any(p_line_ids) and shipper_id is null
+    group by shipper_name_candidate
+  )
+  insert into batch_shipper_summary (batch_id, group_key, shipper_id, shipper_name, sender_name, line_count, total_original, total_applied, total_final)
+  select v_batch_id, g.group_key, null, g.shipper_name_candidate, g.shipper_name_candidate, g.cnt, g.t_orig, g.t_appl, g.t_final
+  from new_sender_groups g
+  on conflict (batch_id, group_key) do update set
+    line_count = batch_shipper_summary.line_count + excluded.line_count,
+    total_original = batch_shipper_summary.total_original + excluded.total_original,
+    total_applied = batch_shipper_summary.total_applied + excluded.total_applied,
+    total_final = batch_shipper_summary.total_final + excluded.total_final;
+
+  -- 5) type_summary도 동일하게 (옛 것 차감)
+  with old_shipper_type as (
+    select case when shipper_id is null then 'unregistered' else 'shipper:'||shipper_id::text end as group_key,
+      reservation_type, count(*) as cnt, sum(total_fee) as t_orig, sum(applied_amount) as t_appl, sum(final_amount) as t_final
+    from tmp_reassign_before
+    group by shipper_id, reservation_type
+  )
+  update batch_shipper_type_summary bts
+  set line_count = bts.line_count - g.cnt,
+      total_original = bts.total_original - g.t_orig,
+      total_applied = bts.total_applied - g.t_appl,
+      total_final = bts.total_final - g.t_final
+  from old_shipper_type g
+  where bts.batch_id = v_batch_id and bts.group_key = g.group_key and bts.reservation_type = g.reservation_type;
+
+  with old_sender_type as (
+    select 'sender:'||shipper_name_candidate as group_key,
+      reservation_type, count(*) as cnt, sum(total_fee) as t_orig, sum(applied_amount) as t_appl, sum(final_amount) as t_final
+    from tmp_reassign_before where shipper_id is null
+    group by shipper_name_candidate, reservation_type
+  )
+  update batch_shipper_type_summary bts
+  set line_count = bts.line_count - g.cnt,
+      total_original = bts.total_original - g.t_orig,
+      total_applied = bts.total_applied - g.t_appl,
+      total_final = bts.total_final - g.t_final
+  from old_sender_type g
+  where bts.batch_id = v_batch_id and bts.group_key = g.group_key and bts.reservation_type = g.reservation_type;
+
+  -- 6) type_summary 새 것 추가
+  with new_shipper_type as (
+    select case when shipper_id is null then 'unregistered' else 'shipper:'||shipper_id::text end as group_key,
+      reservation_type, count(*) as cnt, sum(total_fee) as t_orig, sum(applied_amount) as t_appl, sum(final_amount) as t_final
+    from invoice_lines where id = any(p_line_ids)
+    group by shipper_id, reservation_type
+  )
+  insert into batch_shipper_type_summary (batch_id, group_key, reservation_type, line_count, total_original, total_applied, total_final)
+  select v_batch_id, g.group_key, g.reservation_type, g.cnt, g.t_orig, g.t_appl, g.t_final
+  from new_shipper_type g
+  on conflict (batch_id, group_key, reservation_type) do update set
+    line_count = batch_shipper_type_summary.line_count + excluded.line_count,
+    total_original = batch_shipper_type_summary.total_original + excluded.total_original,
+    total_applied = batch_shipper_type_summary.total_applied + excluded.total_applied,
+    total_final = batch_shipper_type_summary.total_final + excluded.total_final;
+
+  with new_sender_type as (
+    select 'sender:'||shipper_name_candidate as group_key,
+      reservation_type, count(*) as cnt, sum(total_fee) as t_orig, sum(applied_amount) as t_appl, sum(final_amount) as t_final
+    from invoice_lines where id = any(p_line_ids) and shipper_id is null
+    group by shipper_name_candidate, reservation_type
+  )
+  insert into batch_shipper_type_summary (batch_id, group_key, reservation_type, line_count, total_original, total_applied, total_final)
+  select v_batch_id, g.group_key, g.reservation_type, g.cnt, g.t_orig, g.t_appl, g.t_final
+  from new_sender_type g
+  on conflict (batch_id, group_key, reservation_type) do update set
+    line_count = batch_shipper_type_summary.line_count + excluded.line_count,
+    total_original = batch_shipper_type_summary.total_original + excluded.total_original,
+    total_applied = batch_shipper_type_summary.total_applied + excluded.total_applied,
+    total_final = batch_shipper_type_summary.total_final + excluded.total_final;
+
+  -- 7) 정리: 다 빠져서 0(이하)가 된 그룹, sender: 그룹인데 1건 이하로 줄어든 것 제거
+  delete from batch_shipper_summary where batch_id = v_batch_id and group_key not like 'sender:%' and line_count <= 0;
+  delete from batch_shipper_summary where batch_id = v_batch_id and group_key like 'sender:%' and line_count <= 1;
+  delete from batch_shipper_type_summary bts
+  where bts.batch_id = v_batch_id
+    and (bts.line_count <= 0
+      or (bts.group_key like 'sender:%' and not exists (
+        select 1 from batch_shipper_summary bss where bss.batch_id = bts.batch_id and bss.group_key = bts.group_key
+      )));
 
   return query select v_updated, coalesce(v_matched, 0);
 end;
