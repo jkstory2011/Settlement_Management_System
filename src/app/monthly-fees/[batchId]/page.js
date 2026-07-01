@@ -27,12 +27,20 @@ export default function BatchDetailPage() {
   const [recomputing, setRecomputing] = useState(false)
   const [mergingName, setMergingName] = useState(null)
   const [dragOverShipperId, setDragOverShipperId] = useState(null)
+  const [shippers, setShippers] = useState([])
+  const [expandedShipperId, setExpandedShipperId] = useState(null)
+  const [unmergingName, setUnmergingName] = useState(null)
   const pageSize = 50
 
   async function loadBreakdown() {
-    const res = await fetch(`/api/batches/${batchId}/breakdown`)
-    const json = await res.json()
+    const [breakdownRes, shippersRes] = await Promise.all([
+      fetch(`/api/batches/${batchId}/breakdown`),
+      fetch('/api/shippers'),
+    ])
+    const json = await breakdownRes.json()
+    const shippersJson = await shippersRes.json()
     setBreakdown(json.breakdown || [])
+    setShippers(shippersJson.shippers || [])
   }
 
   // filterKey를 lines/summary API에 쓸 쿼리 파라미터로 변환
@@ -124,6 +132,26 @@ export default function BatchDetailPage() {
     }
   }
 
+  // 잘못 병합한 별칭을 해제 -- merge-candidate의 반대 동작
+  async function handleUnmergeAlias(shipperId, aliasName) {
+    setUnmergingName(aliasName)
+    try {
+      const res = await fetch(`/api/batches/${batchId}/unmerge-candidate`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ shipper_id: shipperId, candidate_name: aliasName }),
+      })
+      const json = await res.json()
+      if (!res.ok) throw new Error(json.error || '해제 실패')
+
+      await Promise.all([loadBreakdown(), loadLines()])
+    } catch (err) {
+      alert(err.message)
+    } finally {
+      setUnmergingName(null)
+    }
+  }
+
   function handleSearch(e) {
     e.preventDefault()
     setPage(1)
@@ -208,6 +236,10 @@ export default function BatchDetailPage() {
               const isRegisteredShipper = b.shipper_id != null
               const isActive = filterKey === key
               const isDragOver = isRegisteredShipper && dragOverShipperId === b.shipper_id
+              const shipperAlias = isRegisteredShipper
+                ? shippers.find((s) => s.id === b.shipper_id)?.alias || []
+                : []
+              const isExpanded = isRegisteredShipper && expandedShipperId === b.shipper_id
               return (
                 <li key={key}>
                   <div
@@ -266,7 +298,33 @@ export default function BatchDetailPage() {
                         {registeringName === b.sender_name ? '등록중' : mergingName === b.sender_name ? '병합중' : '등록'}
                       </button>
                     )}
+                    {isRegisteredShipper && shipperAlias.length > 0 && (
+                      <button
+                        onClick={() => setExpandedShipperId(isExpanded ? null : b.shipper_id)}
+                        title="병합된 이름 보기"
+                        className="shrink-0 rounded px-1 text-xs text-slate-400 transition hover:bg-slate-200 dark:text-slate-500 dark:hover:bg-slate-700"
+                      >
+                        {isExpanded ? '▾' : '▸'}
+                      </button>
+                    )}
                   </div>
+                  {isExpanded && (
+                    <div className="ml-4 mt-1 space-y-1 border-l border-slate-200 pl-2 dark:border-slate-800">
+                      {shipperAlias.map((alias) => (
+                        <div key={alias} className="flex items-center justify-between gap-1 text-xs text-slate-500 dark:text-slate-400">
+                          <span className="truncate">{alias}</span>
+                          <button
+                            onClick={() => handleUnmergeAlias(b.shipper_id, alias)}
+                            disabled={unmergingName === alias}
+                            title="병합 해제"
+                            className="shrink-0 rounded px-1 text-rose-500 transition hover:bg-rose-50 disabled:opacity-50 dark:text-rose-400 dark:hover:bg-rose-500/10"
+                          >
+                            {unmergingName === alias ? '해제중' : '✕'}
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  )}
                 </li>
               )
             })}
