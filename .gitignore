@@ -1,0 +1,7 @@
+node_modules
+.next
+.env.local
+.env*.local
+npm-debug.log*
+엑셀 데이터 원본
+.claude/
