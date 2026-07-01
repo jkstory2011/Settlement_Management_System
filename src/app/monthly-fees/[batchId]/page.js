@@ -408,6 +408,8 @@ export default function BatchDetailPage() {
               <Th>구분</Th>
               <Th>송화인</Th>
               <Th>받는분</Th>
+              <Th>품목명</Th>
+              <Th className="text-right">수량</Th>
               <Th className="text-right">원본운임</Th>
               <Th className="text-right">적용금액</Th>
               <Th className="text-right">최종금액</Th>
@@ -431,6 +433,10 @@ export default function BatchDetailPage() {
                   </Td>
                   <Td>{l.sender_name}</Td>
                   <Td>{l.receiver_name}</Td>
+                  <Td className="max-w-xs truncate" title={l.item_name}>
+                    {l.item_name}
+                  </Td>
+                  <Td className="tabular text-right">{l.qty}</Td>
                   <Td className="tabular text-right text-slate-500 dark:text-slate-500">{Number(l.total_fee).toLocaleString()}</Td>
                   <Td className="tabular text-right">{Number(l.applied_amount).toLocaleString()}</Td>
                   <Td className="tabular text-right font-medium">
@@ -472,7 +478,7 @@ export default function BatchDetailPage() {
                   </Td>
                 </Tr>
               ))}
-              {!loading && lines.length === 0 && <EmptyRow colSpan={9}>조회된 내역이 없습니다.</EmptyRow>}
+              {!loading && lines.length === 0 && <EmptyRow colSpan={11}>조회된 내역이 없습니다.</EmptyRow>}
             </TBody>
           </Table>
 

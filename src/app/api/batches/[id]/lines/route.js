@@ -19,7 +19,7 @@ export async function GET(request, { params }) {
   let query = supabase
     .from('invoice_lines')
     .select(
-      'id, no, pickup_date, tracking_no, sender_name, receiver_name, item_name, base_fee, other_fee, total_fee, applied_amount, manual_amount, final_amount, is_manual_edit, shipper_id, reservation_type',
+      'id, no, pickup_date, tracking_no, sender_name, receiver_name, item_name, qty, base_fee, other_fee, total_fee, applied_amount, manual_amount, final_amount, is_manual_edit, shipper_id, reservation_type',
       // 검색어가 없으면 count:'exact'를 요청하지 않는다 -- 21만 건짜리 배치에서 매번 COUNT(*)를 다시 하면
       // 몇 초씩 걸려서, 검색이 없을 때는 미리 계산해둔 캐시(batch_shipper_summary/monthly_batches)의
       // 건수를 대신 사용한다. 검색어가 있을 때만 그 하위집합에 대해 정확한 개수를 새로 센다.
