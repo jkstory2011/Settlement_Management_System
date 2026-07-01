@@ -2,6 +2,12 @@
 
 import { useEffect, useState } from 'react'
 import Link from 'next/link'
+import Card from '@/components/ui/Card'
+import Button from '@/components/ui/Button'
+import Badge from '@/components/ui/Badge'
+import PageHeader from '@/components/ui/PageHeader'
+import { Label, Select, Input } from '@/components/ui/Input'
+import { Table, THead, Th, TBody, Tr, Td, EmptyRow } from '@/components/ui/Table'
 
 export default function MonthlyFeesPage() {
   const [carriers, setCarriers] = useState([])
@@ -60,106 +66,70 @@ export default function MonthlyFeesPage() {
 
   return (
     <main>
-      <div className="mb-4 flex items-center justify-between">
-        <h1 className="text-2xl font-bold">월 택배비 수정</h1>
-        <Link href="/" className="text-sm text-blue-600 hover:underline">
-          홈으로
-        </Link>
-      </div>
+      <PageHeader eyebrow="Settlement Console" title="월 택배비 수정" backHref="/" backLabel="홈으로" />
 
-      <form onSubmit={handleUpload} className="mb-6 flex flex-wrap items-end gap-3 rounded-lg border border-gray-200 bg-white p-4">
-        <div>
-          <label className="mb-1 block text-xs text-gray-500">택배사</label>
-          <select
-            className="w-44 rounded border border-gray-300 px-3 py-2 text-sm"
-            value={carrierId}
-            onChange={(e) => setCarrierId(e.target.value)}
-          >
-            {carriers.map((c) => (
-              <option key={c.id} value={c.id}>
-                {c.name}
-              </option>
-            ))}
-          </select>
-        </div>
-        <div>
-          <label className="mb-1 block text-xs text-gray-500">대상 월</label>
-          <input
-            type="month"
-            className="rounded border border-gray-300 px-3 py-2 text-sm"
-            value={yearMonth}
-            onChange={(e) => setYearMonth(e.target.value)}
-          />
-        </div>
-        <div>
-          <label className="mb-1 block text-xs text-gray-500">원본 내역서 (xlsx)</label>
-          <input
-            type="file"
-            accept=".xlsx"
-            className="text-sm"
-            onChange={(e) => setFile(e.target.files?.[0] || null)}
-          />
-        </div>
-        <button
-          type="submit"
-          disabled={uploading}
-          className="rounded bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50"
-        >
-          {uploading ? '처리 중...' : '업로드'}
-        </button>
-        {progress && <p className="w-full text-sm text-gray-600">{progress}</p>}
-        {error && <p className="w-full text-sm text-red-600">{error}</p>}
-      </form>
+      <Card className="mb-6 p-4">
+        <form onSubmit={handleUpload} className="flex flex-wrap items-end gap-3">
+          <div>
+            <Label>택배사</Label>
+            <Select className="w-44" value={carrierId} onChange={(e) => setCarrierId(e.target.value)}>
+              {carriers.map((c) => (
+                <option key={c.id} value={c.id}>
+                  {c.name}
+                </option>
+              ))}
+            </Select>
+          </div>
+          <div>
+            <Label>대상 월</Label>
+            <Input type="month" value={yearMonth} onChange={(e) => setYearMonth(e.target.value)} />
+          </div>
+          <div>
+            <Label>원본 내역서 (xlsx)</Label>
+            <input
+              type="file"
+              accept=".xlsx"
+              className="text-sm text-slate-600 file:mr-3 file:rounded-md file:border-0 file:bg-slate-100 file:px-3 file:py-1.5 file:text-sm file:font-medium file:text-slate-700 hover:file:bg-slate-200 dark:text-slate-400 dark:file:bg-slate-800 dark:file:text-slate-300 dark:hover:file:bg-slate-700"
+              onChange={(e) => setFile(e.target.files?.[0] || null)}
+            />
+          </div>
+          <Button type="submit" disabled={uploading}>
+            {uploading ? '처리 중...' : '업로드'}
+          </Button>
+          {progress && <p className="w-full text-sm text-slate-500 dark:text-slate-400">{progress}</p>}
+          {error && <p className="w-full text-sm text-rose-600 dark:text-rose-400">{error}</p>}
+        </form>
+      </Card>
 
-      <div className="overflow-hidden rounded-lg border border-gray-200 bg-white">
-        <table className="w-full text-sm">
-          <thead className="bg-gray-100 text-left text-gray-600">
-            <tr>
-              <th className="px-4 py-2">대상 월</th>
-              <th className="px-4 py-2">택배사</th>
-              <th className="px-4 py-2">파일명</th>
-              <th className="px-4 py-2">건수</th>
-              <th className="px-4 py-2">상태</th>
-              <th className="px-4 py-2"></th>
-            </tr>
-          </thead>
-          <tbody>
-            {batches.map((b) => (
-              <tr key={b.id} className="border-t border-gray-100">
-                <td className="px-4 py-2 font-medium">{b.year_month}</td>
-                <td className="px-4 py-2">{b.carrier?.name}</td>
-                <td className="px-4 py-2 text-gray-500">{b.file_name}</td>
-                <td className="px-4 py-2">{b.total_rows?.toLocaleString()}</td>
-                <td className="px-4 py-2">
-                  <span
-                    className={`rounded px-2 py-1 text-xs ${
-                      b.status === 'done'
-                        ? 'bg-green-100 text-green-700'
-                        : b.status === 'error'
-                          ? 'bg-red-100 text-red-700'
-                          : 'bg-amber-100 text-amber-700'
-                    }`}
-                  >
-                    {b.status}
-                  </span>
-                </td>
-                <td className="px-4 py-2 text-right">
-                  <Link href={`/monthly-fees/${b.id}`} className="text-blue-600 hover:underline">
-                    상세/수정
-                  </Link>
-                </td>
-              </tr>
-            ))}
-            {batches.length === 0 && (
-              <tr>
-                <td colSpan={6} className="px-4 py-6 text-center text-gray-400">
-                  업로드된 내역서가 없습니다.
-                </td>
-              </tr>
-            )}
-          </tbody>
-        </table>
-      </div>
+      <Table>
+        <THead>
+          <Th>대상 월</Th>
+          <Th>택배사</Th>
+          <Th>파일명</Th>
+          <Th className="text-right">건수</Th>
+          <Th>상태</Th>
+          <Th></Th>
+        </THead>
+        <TBody>
+          {batches.map((b) => (
+            <Tr key={b.id}>
+              <Td className="font-medium text-slate-900 dark:text-slate-200">{b.year_month}</Td>
+              <Td>{b.carrier?.name}</Td>
+              <Td className="text-slate-500 dark:text-slate-500">{b.file_name}</Td>
+              <Td className="tabular text-right">{b.total_rows?.toLocaleString()}</Td>
+              <Td>
+                <Badge status={b.status} />
+              </Td>
+              <Td className="text-right">
+                <Link href={`/monthly-fees/${b.id}`} className="text-cyan-600 hover:underline dark:text-cyan-400">
+                  상세/수정
+                </Link>
+              </Td>
+            </Tr>
+          ))}
+          {batches.length === 0 && <EmptyRow colSpan={6}>업로드된 내역서가 없습니다.</EmptyRow>}
+        </TBody>
+      </Table>
     </main>
   )
 }

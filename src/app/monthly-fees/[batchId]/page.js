@@ -1,8 +1,13 @@
 'use client'
 
 import { useEffect, useState } from 'react'
-import Link from 'next/link'
 import { useParams } from 'next/navigation'
+import Card from '@/components/ui/Card'
+import Button from '@/components/ui/Button'
+import KpiCard from '@/components/ui/KpiCard'
+import PageHeader from '@/components/ui/PageHeader'
+import { Input } from '@/components/ui/Input'
+import { Table, THead, Th, TBody, Tr, Td, EmptyRow } from '@/components/ui/Table'
 
 export default function BatchDetailPage() {
   const { batchId } = useParams()
@@ -136,26 +141,25 @@ export default function BatchDetailPage() {
 
   return (
     <main>
-      <div className="mb-4 flex items-center justify-between">
-        <h1 className="text-2xl font-bold">월 택배비 수정</h1>
-        <div className="flex items-center gap-3">
-          <button
+      <PageHeader
+        eyebrow="Settlement Console"
+        title="월 택배비 수정"
+        backHref="/monthly-fees"
+        actions={
+          <Button
+            variant="secondary"
             onClick={handleRecompute}
             disabled={recomputing}
-            className="rounded border border-gray-300 bg-white px-3 py-1.5 text-sm hover:bg-gray-100 disabled:opacity-50"
             title="화주사/구간표를 업로드 이후에 변경했다면 눌러서 적용금액을 다시 계산하세요."
           >
             {recomputing ? '재계산 중...' : '화주사/단가 재계산'}
-          </button>
-          <Link href="/monthly-fees" className="text-sm text-blue-600 hover:underline">
-            목록으로
-          </Link>
-        </div>
-      </div>
+          </Button>
+        }
+      />
 
-      <div className="mb-6 grid gap-4 lg:grid-cols-[240px_1fr]">
-        <aside className="rounded-lg border border-gray-200 bg-white p-3">
-          <h2 className="mb-2 text-sm font-semibold text-gray-600">화주사별 건수</h2>
+      <div className="mb-6 grid gap-4 lg:grid-cols-[260px_1fr]">
+        <Card className="p-3">
+          <h2 className="mb-2 px-1 text-sm font-semibold text-slate-600 dark:text-slate-400">화주사별 건수</h2>
           <ul className="max-h-[60vh] space-y-1 overflow-y-auto text-sm">
             <li>
               <button
@@ -163,7 +167,9 @@ export default function BatchDetailPage() {
                   setFilterKey('')
                   setPage(1)
                 }}
-                className={`w-full rounded px-2 py-1 text-left hover:bg-gray-100 ${filterKey === '' ? 'bg-blue-50 font-medium text-blue-700' : ''}`}
+                className={`w-full rounded px-2 py-1 text-left transition hover:bg-slate-100 dark:hover:bg-slate-800 ${
+                  filterKey === '' ? 'bg-cyan-50 font-medium text-cyan-700 dark:bg-cyan-500/10 dark:text-cyan-300' : ''
+                }`}
               >
                 전체
               </button>
@@ -171,11 +177,12 @@ export default function BatchDetailPage() {
             {breakdown.map((b) => {
               const key = b.sender_name ? `n:${b.sender_name}` : b.shipper_id == null ? 'unregistered' : `s:${b.shipper_id}`
               const isUnregisteredRepeat = Boolean(b.sender_name)
+              const isActive = filterKey === key
               return (
                 <li key={key}>
                   <div
-                    className={`flex w-full items-center gap-1 rounded px-2 py-1 hover:bg-gray-100 ${
-                      filterKey === key ? 'bg-blue-50 font-medium text-blue-700' : ''
+                    className={`flex w-full items-center gap-1 rounded px-2 py-1 transition hover:bg-slate-100 dark:hover:bg-slate-800 ${
+                      isActive ? 'bg-cyan-50 font-medium text-cyan-700 dark:bg-cyan-500/10 dark:text-cyan-300' : ''
                     }`}
                   >
                     <button
@@ -189,14 +196,16 @@ export default function BatchDetailPage() {
                         {isUnregisteredRepeat && <span className="mr-1 text-amber-500">●</span>}
                         {b.shipper_name}
                       </span>
-                      <span className="ml-2 shrink-0 text-xs text-gray-400">{Number(b.line_count).toLocaleString()}</span>
+                      <span className="tabular ml-2 shrink-0 text-xs text-slate-400 dark:text-slate-500">
+                        {Number(b.line_count).toLocaleString()}
+                      </span>
                     </button>
                     {isUnregisteredRepeat && (
                       <button
                         onClick={() => handleRegisterSender(b.sender_name)}
                         disabled={registeringName === b.sender_name}
                         title="화주사로 등록"
-                        className="shrink-0 rounded border border-blue-200 px-1.5 py-0.5 text-xs text-blue-600 hover:bg-blue-50 disabled:opacity-50"
+                        className="shrink-0 rounded border border-cyan-200 px-1.5 py-0.5 text-xs text-cyan-700 transition hover:bg-cyan-50 disabled:opacity-50 dark:border-cyan-800 dark:text-cyan-400 dark:hover:bg-cyan-500/10"
                       >
                         {registeringName === b.sender_name ? '등록중' : '등록'}
                       </button>
@@ -206,131 +215,124 @@ export default function BatchDetailPage() {
               )
             })}
           </ul>
-          <p className="mt-2 text-xs text-gray-400">● 표시는 화주사 미등록이지만 2건 이상 반복 발송된 송화인입니다.</p>
-        </aside>
+          <p className="mt-2 px-1 text-xs text-slate-400 dark:text-slate-500">
+            ● 표시는 화주사 미등록이지만 2건 이상 반복 발송된 송화인입니다.
+          </p>
+        </Card>
 
         <section>
           {summary && (
             <div className="mb-4 grid grid-cols-2 gap-3 sm:grid-cols-4">
-              <SummaryCard label="건수" value={Number(summary.line_count).toLocaleString()} />
-              <SummaryCard label="원본(CJ) 합계" value={`${Number(summary.total_original).toLocaleString()}원`} />
-              <SummaryCard label="적용 합계" value={`${Number(summary.total_applied).toLocaleString()}원`} />
-              <SummaryCard label="최종(수정반영) 합계" value={`${Number(summary.total_final).toLocaleString()}원`} highlight />
+              <KpiCard label="건수" value={Number(summary.line_count).toLocaleString()} />
+              <KpiCard label="원본(CJ) 합계" value={`${Number(summary.total_original).toLocaleString()}`} unit="원" />
+              <KpiCard label="적용 합계" value={`${Number(summary.total_applied).toLocaleString()}`} unit="원" />
+              <KpiCard
+                label="최종(수정반영) 합계"
+                value={`${Number(summary.total_final).toLocaleString()}`}
+                unit="원"
+                tone="accent"
+              />
             </div>
           )}
 
           <form onSubmit={handleSearch} className="mb-3 flex gap-2">
-            <input
+            <Input
               placeholder="운송장번호 / 송화인 / 받는분 검색"
-              className="flex-1 rounded border border-gray-300 px-3 py-2 text-sm"
+              className="flex-1"
               value={qInput}
               onChange={(e) => setQInput(e.target.value)}
             />
-            <button type="submit" className="rounded bg-gray-800 px-4 py-2 text-sm text-white hover:bg-gray-900">
+            <Button type="submit" variant="secondary">
               검색
-            </button>
+            </Button>
           </form>
 
-          <div className="overflow-x-auto rounded-lg border border-gray-200 bg-white">
-            <table className="w-full text-sm">
-              <thead className="bg-gray-100 text-left text-gray-600">
-                <tr>
-                  <th className="px-3 py-2">집화일자</th>
-                  <th className="px-3 py-2">운송장번호</th>
-                  <th className="px-3 py-2">송화인</th>
-                  <th className="px-3 py-2">받는분</th>
-                  <th className="px-3 py-2 text-right">원본운임</th>
-                  <th className="px-3 py-2 text-right">적용금액</th>
-                  <th className="px-3 py-2 text-right">최종금액</th>
-                  <th className="px-3 py-2"></th>
-                </tr>
-              </thead>
-              <tbody>
-                {lines.map((l) => (
-                  <tr key={l.id} className="border-t border-gray-100">
-                    <td className="px-3 py-2 text-gray-500">{l.pickup_date}</td>
-                    <td className="px-3 py-2">{l.tracking_no}</td>
-                    <td className="px-3 py-2">{l.sender_name}</td>
-                    <td className="px-3 py-2">{l.receiver_name}</td>
-                    <td className="px-3 py-2 text-right text-gray-500">{Number(l.total_fee).toLocaleString()}</td>
-                    <td className="px-3 py-2 text-right">{Number(l.applied_amount).toLocaleString()}</td>
-                    <td className="px-3 py-2 text-right font-medium">
-                      {editingId === l.id ? (
-                        <input
-                          autoFocus
-                          type="number"
-                          className="w-24 rounded border border-gray-300 px-2 py-1 text-right text-sm"
-                          value={editValue}
-                          onChange={(e) => setEditValue(e.target.value)}
-                        />
-                      ) : (
-                        <span className={l.is_manual_edit ? 'text-orange-600' : ''}>{Number(l.final_amount).toLocaleString()}</span>
-                      )}
-                    </td>
-                    <td className="px-3 py-2 text-right">
-                      {editingId === l.id ? (
-                        <div className="flex justify-end gap-2">
-                          <button onClick={() => saveEdit(l)} className="text-xs text-blue-600 hover:underline">
-                            저장
-                          </button>
-                          <button onClick={() => setEditingId(null)} className="text-xs text-gray-400 hover:underline">
-                            취소
-                          </button>
-                        </div>
-                      ) : (
-                        <button onClick={() => startEdit(l)} className="text-xs text-gray-500 hover:underline">
-                          수정
+          <Table>
+            <THead>
+              <Th>집화일자</Th>
+              <Th>운송장번호</Th>
+              <Th>송화인</Th>
+              <Th>받는분</Th>
+              <Th className="text-right">원본운임</Th>
+              <Th className="text-right">적용금액</Th>
+              <Th className="text-right">최종금액</Th>
+              <Th></Th>
+            </THead>
+            <TBody>
+              {lines.map((l) => (
+                <Tr key={l.id}>
+                  <Td className="text-slate-500 dark:text-slate-500">{l.pickup_date}</Td>
+                  <Td>{l.tracking_no}</Td>
+                  <Td>{l.sender_name}</Td>
+                  <Td>{l.receiver_name}</Td>
+                  <Td className="tabular text-right text-slate-500 dark:text-slate-500">{Number(l.total_fee).toLocaleString()}</Td>
+                  <Td className="tabular text-right">{Number(l.applied_amount).toLocaleString()}</Td>
+                  <Td className="tabular text-right font-medium">
+                    {editingId === l.id ? (
+                      <Input
+                        autoFocus
+                        type="number"
+                        className="w-24 text-right"
+                        value={editValue}
+                        onChange={(e) => setEditValue(e.target.value)}
+                      />
+                    ) : (
+                      <span className={l.is_manual_edit ? 'text-amber-600 dark:text-amber-400' : ''}>
+                        {Number(l.final_amount).toLocaleString()}
+                      </span>
+                    )}
+                  </Td>
+                  <Td className="text-right">
+                    {editingId === l.id ? (
+                      <div className="flex justify-end gap-2">
+                        <button onClick={() => saveEdit(l)} className="text-xs text-cyan-600 hover:underline dark:text-cyan-400">
+                          저장
                         </button>
-                      )}
-                    </td>
-                  </tr>
-                ))}
-                {!loading && lines.length === 0 && (
-                  <tr>
-                    <td colSpan={8} className="px-4 py-6 text-center text-gray-400">
-                      조회된 내역이 없습니다.
-                    </td>
-                  </tr>
-                )}
-              </tbody>
-            </table>
-          </div>
+                        <button
+                          onClick={() => setEditingId(null)}
+                          className="text-xs text-slate-400 hover:underline dark:text-slate-500"
+                        >
+                          취소
+                        </button>
+                      </div>
+                    ) : (
+                      <button
+                        onClick={() => startEdit(l)}
+                        className="text-xs text-slate-500 hover:underline dark:text-slate-400"
+                      >
+                        수정
+                      </button>
+                    )}
+                  </Td>
+                </Tr>
+              ))}
+              {!loading && lines.length === 0 && <EmptyRow colSpan={8}>조회된 내역이 없습니다.</EmptyRow>}
+            </TBody>
+          </Table>
 
-          <div className="mt-3 flex items-center justify-between text-sm text-gray-500">
-            <span>
+          <div className="mt-3 flex items-center justify-between text-sm text-slate-500 dark:text-slate-400">
+            <span className="tabular">
               총 {total.toLocaleString()}건 중 {(page - 1) * pageSize + 1}-{Math.min(page * pageSize, total)}
             </span>
-            <div className="flex gap-2">
-              <button
-                disabled={page <= 1}
-                onClick={() => setPage((p) => Math.max(1, p - 1))}
-                className="rounded border border-gray-300 px-3 py-1 disabled:opacity-40"
-              >
+            <div className="flex items-center gap-2">
+              <Button variant="secondary" disabled={page <= 1} onClick={() => setPage((p) => Math.max(1, p - 1))} className="px-3 py-1">
                 이전
-              </button>
-              <span>
+              </Button>
+              <span className="tabular">
                 {page} / {totalPages}
               </span>
-              <button
+              <Button
+                variant="secondary"
                 disabled={page >= totalPages}
                 onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
-                className="rounded border border-gray-300 px-3 py-1 disabled:opacity-40"
+                className="px-3 py-1"
               >
                 다음
-              </button>
+              </Button>
             </div>
           </div>
         </section>
       </div>
     </main>
-  )
-}
-
-function SummaryCard({ label, value, highlight }) {
-  return (
-    <div className={`rounded-lg border p-3 ${highlight ? 'border-blue-200 bg-blue-50' : 'border-gray-200 bg-white'}`}>
-      <p className="text-xs text-gray-500">{label}</p>
-      <p className={`mt-1 text-lg font-semibold ${highlight ? 'text-blue-700' : ''}`}>{value}</p>
-    </div>
   )
 }

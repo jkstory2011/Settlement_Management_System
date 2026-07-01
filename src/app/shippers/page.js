@@ -2,6 +2,11 @@
 
 import { useEffect, useState } from 'react'
 import Link from 'next/link'
+import Card from '@/components/ui/Card'
+import Button from '@/components/ui/Button'
+import PageHeader from '@/components/ui/PageHeader'
+import { Input } from '@/components/ui/Input'
+import { Table, THead, Th, TBody, Tr, Td, EmptyRow } from '@/components/ui/Table'
 
 export default function ShippersPage() {
   const [shippers, setShippers] = useState([])
@@ -60,96 +65,75 @@ export default function ShippersPage() {
 
   return (
     <main>
-      <div className="mb-4 flex items-center justify-between">
-        <h1 className="text-2xl font-bold">화주사 관리</h1>
-        <Link href="/" className="text-sm text-blue-600 hover:underline">
-          홈으로
-        </Link>
-      </div>
+      <PageHeader eyebrow="Settlement Console" title="화주사 관리" backHref="/" backLabel="홈으로" />
 
-      <form onSubmit={handleCreate} className="mb-6 grid gap-3 rounded-lg border border-gray-200 bg-white p-4 sm:grid-cols-2 lg:grid-cols-4">
-        <input
-          required
-          placeholder="화주사명 (필수, 송화인 표기와 일치)"
-          className="rounded border border-gray-300 px-3 py-2 text-sm"
-          value={form.name}
-          onChange={(e) => setForm({ ...form, name: e.target.value })}
-        />
-        <input
-          placeholder="별칭 (콤마로 구분, 선택)"
-          className="rounded border border-gray-300 px-3 py-2 text-sm"
-          value={form.alias}
-          onChange={(e) => setForm({ ...form, alias: e.target.value })}
-        />
-        <input
-          placeholder="연락처"
-          className="rounded border border-gray-300 px-3 py-2 text-sm"
-          value={form.contact}
-          onChange={(e) => setForm({ ...form, contact: e.target.value })}
-        />
-        <input
-          placeholder="메모"
-          className="rounded border border-gray-300 px-3 py-2 text-sm"
-          value={form.memo}
-          onChange={(e) => setForm({ ...form, memo: e.target.value })}
-        />
-        <button type="submit" className="rounded bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 sm:col-span-2 lg:col-span-1">
-          화주사 등록
-        </button>
-        {error && <p className="text-sm text-red-600 sm:col-span-4">{error}</p>}
-      </form>
+      <Card className="mb-6 p-4">
+        <form onSubmit={handleCreate} className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+          <Input
+            required
+            placeholder="화주사명 (필수, 송화인 표기와 일치)"
+            value={form.name}
+            onChange={(e) => setForm({ ...form, name: e.target.value })}
+          />
+          <Input
+            placeholder="별칭 (콤마로 구분, 선택)"
+            value={form.alias}
+            onChange={(e) => setForm({ ...form, alias: e.target.value })}
+          />
+          <Input placeholder="연락처" value={form.contact} onChange={(e) => setForm({ ...form, contact: e.target.value })} />
+          <Input placeholder="메모" value={form.memo} onChange={(e) => setForm({ ...form, memo: e.target.value })} />
+          <Button type="submit" className="sm:col-span-2 lg:col-span-1">
+            화주사 등록
+          </Button>
+          {error && <p className="text-sm text-rose-600 dark:text-rose-400 sm:col-span-4">{error}</p>}
+        </form>
+      </Card>
 
       {loading ? (
-        <p className="text-sm text-gray-500">불러오는 중...</p>
+        <p className="text-sm text-slate-500 dark:text-slate-400">불러오는 중...</p>
       ) : (
-        <div className="overflow-hidden rounded-lg border border-gray-200 bg-white">
-          <table className="w-full text-sm">
-            <thead className="bg-gray-100 text-left text-gray-600">
-              <tr>
-                <th className="px-4 py-2">화주사명</th>
-                <th className="px-4 py-2">별칭</th>
-                <th className="px-4 py-2">연락처</th>
-                <th className="px-4 py-2">상태</th>
-                <th className="px-4 py-2">구간표</th>
-                <th className="px-4 py-2"></th>
-              </tr>
-            </thead>
-            <tbody>
-              {shippers.map((s) => (
-                <tr key={s.id} className="border-t border-gray-100">
-                  <td className="px-4 py-2 font-medium">{s.name}</td>
-                  <td className="px-4 py-2 text-gray-500">{(s.alias || []).join(', ')}</td>
-                  <td className="px-4 py-2 text-gray-500">{s.contact}</td>
-                  <td className="px-4 py-2">
-                    <button
-                      onClick={() => toggleActive(s)}
-                      className={`rounded px-2 py-1 text-xs ${s.is_active ? 'bg-green-100 text-green-700' : 'bg-gray-200 text-gray-500'}`}
-                    >
-                      {s.is_active ? '사용중' : '중지'}
-                    </button>
-                  </td>
-                  <td className="px-4 py-2">
-                    <Link href={`/shippers/${s.id}/rates`} className="text-blue-600 hover:underline">
-                      구간표 관리
-                    </Link>
-                  </td>
-                  <td className="px-4 py-2 text-right">
-                    <button onClick={() => remove(s)} className="text-xs text-red-500 hover:underline">
-                      삭제
-                    </button>
-                  </td>
-                </tr>
-              ))}
-              {shippers.length === 0 && (
-                <tr>
-                  <td colSpan={6} className="px-4 py-6 text-center text-gray-400">
-                    등록된 화주사가 없습니다.
-                  </td>
-                </tr>
-              )}
-            </tbody>
-          </table>
-        </div>
+        <Table>
+          <THead>
+            <Th>화주사명</Th>
+            <Th>별칭</Th>
+            <Th>연락처</Th>
+            <Th>상태</Th>
+            <Th>구간표</Th>
+            <Th></Th>
+          </THead>
+          <TBody>
+            {shippers.map((s) => (
+              <Tr key={s.id}>
+                <Td className="font-medium text-slate-900 dark:text-slate-200">{s.name}</Td>
+                <Td className="text-slate-500 dark:text-slate-500">{(s.alias || []).join(', ')}</Td>
+                <Td className="text-slate-500 dark:text-slate-500">{s.contact}</Td>
+                <Td>
+                  <button
+                    onClick={() => toggleActive(s)}
+                    className={`rounded px-2 py-1 text-xs font-medium transition ${
+                      s.is_active
+                        ? 'bg-emerald-50 text-emerald-700 hover:bg-emerald-100 dark:bg-emerald-500/10 dark:text-emerald-400 dark:hover:bg-emerald-500/20'
+                        : 'bg-slate-100 text-slate-500 hover:bg-slate-200 dark:bg-slate-800 dark:text-slate-400 dark:hover:bg-slate-700'
+                    }`}
+                  >
+                    {s.is_active ? '사용중' : '중지'}
+                  </button>
+                </Td>
+                <Td>
+                  <Link href={`/shippers/${s.id}/rates`} className="text-cyan-600 hover:underline dark:text-cyan-400">
+                    구간표 관리
+                  </Link>
+                </Td>
+                <Td className="text-right">
+                  <button onClick={() => remove(s)} className="text-xs text-rose-500 hover:underline dark:text-rose-400">
+                    삭제
+                  </button>
+                </Td>
+              </Tr>
+            ))}
+            {shippers.length === 0 && <EmptyRow colSpan={6}>등록된 화주사가 없습니다.</EmptyRow>}
+          </TBody>
+        </Table>
       )}
     </main>
   )
