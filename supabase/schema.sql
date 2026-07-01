@@ -112,6 +112,9 @@ create index if not exists idx_invoice_lines_batch_tracking on invoice_lines(bat
 create index if not exists idx_invoice_lines_batch_candidate on invoice_lines(batch_id, shipper_name_candidate);
 -- 목록 조회가 batch_id로 필터 후 no로 정렬하는데, 이 인덱스가 없으면 21만 건을 매번 통째로 정렬해야 해서 느려짐
 create index if not exists idx_invoice_lines_batch_no on invoice_lines(batch_id, no);
+-- 일반/반품 필터 + 정렬을 위한 인덱스 (화주사 필터와 조합될 때도 정렬 성능 확보)
+create index if not exists idx_invoice_lines_batch_shipper_no on invoice_lines(batch_id, shipper_id, no);
+create index if not exists idx_invoice_lines_batch_type_no on invoice_lines(batch_id, reservation_type, no);
 
 -- 화주사별/미등록 그룹별 건수·합계 캐시 (월 택배비 수정 화면 사이드바 + 필터별 요약이 여기서 읽음)
 create table if not exists batch_shipper_summary (
@@ -125,4 +128,17 @@ create table if not exists batch_shipper_summary (
   total_applied numeric not null default 0,
   total_final numeric not null default 0,
   primary key (batch_id, group_key)
+);
+
+-- batch_shipper_summary와 동일한 그룹을 예약구분(일반/반품)별로 한 번 더 쪼갠 캐시.
+-- 일반/반품 필터, 화주사별 일반/반품 세부 건수 표시에 사용.
+create table if not exists batch_shipper_type_summary (
+  batch_id bigint not null references monthly_batches(id) on delete cascade,
+  group_key text not null,
+  reservation_type text not null, -- '일반' | '반품'
+  line_count bigint not null default 0,
+  total_original numeric not null default 0,
+  total_applied numeric not null default 0,
+  total_final numeric not null default 0,
+  primary key (batch_id, group_key, reservation_type)
 );

@@ -89,6 +89,7 @@ language sql
 as $$
   update monthly_batches set total_original = 0, total_applied = 0, total_final = 0 where id = p_batch_id;
   delete from batch_shipper_summary where batch_id = p_batch_id;
+  delete from batch_shipper_type_summary where batch_id = p_batch_id;
 $$;
 
 create or replace function refresh_batch_aggregates_chunk(p_batch_id bigint, p_after_id bigint, p_limit integer default 20000)
@@ -100,6 +101,7 @@ begin
     id bigint,
     shipper_id bigint,
     shipper_name_candidate text,
+    reservation_type text,
     total_fee numeric,
     applied_amount numeric,
     final_amount numeric
@@ -108,7 +110,7 @@ begin
   truncate tmp_agg_chunk;
 
   insert into tmp_agg_chunk
-  select il.id, il.shipper_id, il.shipper_name_candidate, il.total_fee, il.applied_amount, il.final_amount
+  select il.id, il.shipper_id, il.shipper_name_candidate, il.reservation_type, il.total_fee, il.applied_amount, il.final_amount
   from invoice_lines il
   where il.batch_id = p_batch_id
     and il.id > p_after_id
@@ -157,6 +159,43 @@ begin
     total_applied = batch_shipper_summary.total_applied + excluded.total_applied,
     total_final = batch_shipper_summary.total_final + excluded.total_final;
 
+  insert into batch_shipper_type_summary
+    (batch_id, group_key, reservation_type, line_count, total_original, total_applied, total_final)
+  select
+    p_batch_id,
+    case when c.shipper_id is null then 'unregistered' else 'shipper:' || c.shipper_id::text end,
+    c.reservation_type,
+    count(*),
+    coalesce(sum(c.total_fee), 0),
+    coalesce(sum(c.applied_amount), 0),
+    coalesce(sum(c.final_amount), 0)
+  from tmp_agg_chunk c
+  group by c.shipper_id, c.reservation_type
+  on conflict (batch_id, group_key, reservation_type) do update set
+    line_count = batch_shipper_type_summary.line_count + excluded.line_count,
+    total_original = batch_shipper_type_summary.total_original + excluded.total_original,
+    total_applied = batch_shipper_type_summary.total_applied + excluded.total_applied,
+    total_final = batch_shipper_type_summary.total_final + excluded.total_final;
+
+  insert into batch_shipper_type_summary
+    (batch_id, group_key, reservation_type, line_count, total_original, total_applied, total_final)
+  select
+    p_batch_id,
+    'sender:' || c.shipper_name_candidate,
+    c.reservation_type,
+    count(*),
+    coalesce(sum(c.total_fee), 0),
+    coalesce(sum(c.applied_amount), 0),
+    coalesce(sum(c.final_amount), 0)
+  from tmp_agg_chunk c
+  where c.shipper_id is null
+  group by c.shipper_name_candidate, c.reservation_type
+  on conflict (batch_id, group_key, reservation_type) do update set
+    line_count = batch_shipper_type_summary.line_count + excluded.line_count,
+    total_original = batch_shipper_type_summary.total_original + excluded.total_original,
+    total_applied = batch_shipper_type_summary.total_applied + excluded.total_applied,
+    total_final = batch_shipper_type_summary.total_final + excluded.total_final;
+
   update monthly_batches mb
   set total_original = mb.total_original + coalesce((select sum(total_fee) from tmp_agg_chunk), 0),
       total_applied = mb.total_applied + coalesce((select sum(applied_amount) from tmp_agg_chunk), 0),
@@ -181,6 +220,15 @@ as $$
       order by line_count desc
       limit 200
     );
+
+  -- 일반/반품 세부 캐시도 위에서 살아남은 sender:* 그룹에 맞춰 정리 (없어진 그룹은 같이 제거)
+  delete from batch_shipper_type_summary bsts
+  where bsts.batch_id = p_batch_id
+    and bsts.group_key like 'sender:%'
+    and not exists (
+      select 1 from batch_shipper_summary bss
+      where bss.batch_id = bsts.batch_id and bss.group_key = bsts.group_key
+    );
 $$;
 
 -- 건별 수동 수정을 반영하면서 monthly_batches/batch_shipper_summary 캐시도 델타만큼 같이 갱신한다.
@@ -193,12 +241,13 @@ declare
   v_batch_id bigint;
   v_shipper_id bigint;
   v_candidate text;
+  v_reservation_type text;
   v_old_final numeric;
   v_new_final numeric;
   v_delta numeric;
 begin
-  select il.batch_id, il.shipper_id, il.shipper_name_candidate, il.final_amount
-  into v_batch_id, v_shipper_id, v_candidate, v_old_final
+  select il.batch_id, il.shipper_id, il.shipper_name_candidate, il.reservation_type, il.final_amount
+  into v_batch_id, v_shipper_id, v_candidate, v_reservation_type, v_old_final
   from invoice_lines il where il.id = p_line_id;
 
   update invoice_lines il
@@ -217,11 +266,23 @@ begin
     where batch_id = v_batch_id
       and group_key = case when v_shipper_id is null then 'unregistered' else 'shipper:' || v_shipper_id::text end;
 
+    update batch_shipper_type_summary
+    set total_final = total_final + v_delta
+    where batch_id = v_batch_id
+      and group_key = case when v_shipper_id is null then 'unregistered' else 'shipper:' || v_shipper_id::text end
+      and reservation_type = v_reservation_type;
+
     if v_shipper_id is null then
       update batch_shipper_summary
       set total_final = total_final + v_delta
       where batch_id = v_batch_id
         and group_key = 'sender:' || v_candidate;
+
+      update batch_shipper_type_summary
+      set total_final = total_final + v_delta
+      where batch_id = v_batch_id
+        and group_key = 'sender:' || v_candidate
+        and reservation_type = v_reservation_type;
     end if;
   end if;
 
@@ -299,24 +360,31 @@ returns integer
 language plpgsql
 as $$
 declare
-  v_old_orig numeric;
-  v_old_appl numeric;
-  v_old_final numeric;
-  v_new_appl numeric;
-  v_new_final numeric;
   v_count integer;
 begin
-  select coalesce(sum(total_fee), 0), coalesce(sum(applied_amount), 0), coalesce(sum(final_amount), 0), count(*)
-  into v_old_orig, v_old_appl, v_old_final, v_count
-  from invoice_lines
-  where batch_id = p_batch_id and shipper_id is null and shipper_name_candidate = p_candidate_name;
+  create temporary table if not exists tmp_assign_before (
+    reservation_type text, cnt bigint, t_orig numeric, t_appl numeric, t_final numeric
+  ) on commit drop;
+  truncate tmp_assign_before;
 
+  insert into tmp_assign_before
+  select reservation_type, count(*), coalesce(sum(total_fee), 0), coalesce(sum(applied_amount), 0), coalesce(sum(final_amount), 0)
+  from invoice_lines
+  where batch_id = p_batch_id and shipper_id is null and shipper_name_candidate = p_candidate_name
+  group by reservation_type;
+
+  select coalesce(sum(cnt), 0) into v_count from tmp_assign_before;
   if v_count = 0 then
     return 0;
   end if;
 
+  create temporary table if not exists tmp_assign_after (
+    reservation_type text, cnt bigint, t_appl numeric, t_final numeric
+  ) on commit drop;
+  truncate tmp_assign_after;
+
   with computed as (
-    select il.id, coalesce(t.contract_price + il.other_fee, il.total_fee) as new_applied
+    select il.id, il.reservation_type, coalesce(t.contract_price + il.other_fee, il.total_fee) as new_applied
     from invoice_lines il
     left join lateral (
       select srt.contract_price
@@ -335,30 +403,50 @@ begin
         applied_amount = c.new_applied
     from computed c
     where il.id = c.id
-    returning il.applied_amount, il.final_amount
+    returning il.reservation_type, il.applied_amount, il.final_amount
   )
-  select coalesce(sum(applied_amount), 0), coalesce(sum(final_amount), 0)
-  into v_new_appl, v_new_final
-  from upd;
+  insert into tmp_assign_after
+  select reservation_type, count(*), coalesce(sum(applied_amount), 0), coalesce(sum(final_amount), 0)
+  from upd
+  group by reservation_type;
 
   update monthly_batches
-  set total_applied = total_applied + (v_new_appl - v_old_appl),
-      total_final = total_final + (v_new_final - v_old_final)
+  set total_applied = total_applied
+        + (select coalesce(sum(t_appl), 0) from tmp_assign_after)
+        - (select coalesce(sum(t_appl), 0) from tmp_assign_before),
+      total_final = total_final
+        + (select coalesce(sum(t_final), 0) from tmp_assign_after)
+        - (select coalesce(sum(t_final), 0) from tmp_assign_before)
   where monthly_batches.id = p_batch_id;
 
   update batch_shipper_summary
   set line_count = line_count - v_count,
-      total_original = total_original - v_old_orig,
-      total_applied = total_applied - v_old_appl,
-      total_final = total_final - v_old_final
+      total_original = total_original - (select coalesce(sum(t_orig), 0) from tmp_assign_before),
+      total_applied = total_applied - (select coalesce(sum(t_appl), 0) from tmp_assign_before),
+      total_final = total_final - (select coalesce(sum(t_final), 0) from tmp_assign_before)
   where batch_id = p_batch_id and group_key = 'unregistered';
 
+  update batch_shipper_type_summary bts
+  set line_count = bts.line_count - b.cnt,
+      total_original = bts.total_original - b.t_orig,
+      total_applied = bts.total_applied - b.t_appl,
+      total_final = bts.total_final - b.t_final
+  from tmp_assign_before b
+  where bts.batch_id = p_batch_id and bts.group_key = 'unregistered' and bts.reservation_type = b.reservation_type;
+
   delete from batch_shipper_summary
+  where batch_id = p_batch_id and group_key = 'sender:' || p_candidate_name;
+  delete from batch_shipper_type_summary
   where batch_id = p_batch_id and group_key = 'sender:' || p_candidate_name;
 
   insert into batch_shipper_summary
     (batch_id, group_key, shipper_id, shipper_name, sender_name, line_count, total_original, total_applied, total_final)
-  select p_batch_id, 'shipper:' || p_shipper_id::text, p_shipper_id, s.name, null, v_count, v_old_orig, v_new_appl, v_new_final
+  select
+    p_batch_id, 'shipper:' || p_shipper_id::text, p_shipper_id, s.name, null,
+    v_count,
+    (select coalesce(sum(t_orig), 0) from tmp_assign_before),
+    (select coalesce(sum(t_appl), 0) from tmp_assign_after),
+    (select coalesce(sum(t_final), 0) from tmp_assign_after)
   from shippers s
   where s.id = p_shipper_id
   on conflict (batch_id, group_key) do update set
@@ -366,6 +454,16 @@ begin
     total_original = batch_shipper_summary.total_original + excluded.total_original,
     total_applied = batch_shipper_summary.total_applied + excluded.total_applied,
     total_final = batch_shipper_summary.total_final + excluded.total_final;
+
+  insert into batch_shipper_type_summary (batch_id, group_key, reservation_type, line_count, total_original, total_applied, total_final)
+  select p_batch_id, 'shipper:' || p_shipper_id::text, b.reservation_type, b.cnt, b.t_orig, a.t_appl, a.t_final
+  from tmp_assign_before b
+  join tmp_assign_after a on a.reservation_type = b.reservation_type
+  on conflict (batch_id, group_key, reservation_type) do update set
+    line_count = batch_shipper_type_summary.line_count + excluded.line_count,
+    total_original = batch_shipper_type_summary.total_original + excluded.total_original,
+    total_applied = batch_shipper_type_summary.total_applied + excluded.total_applied,
+    total_final = batch_shipper_type_summary.total_final + excluded.total_final;
 
   return v_count;
 end;
@@ -380,54 +478,99 @@ language plpgsql
 as $$
 declare
   v_count integer;
-  v_old_appl numeric;
-  v_old_final numeric;
-  v_new_orig numeric;
-  v_new_final numeric;
 begin
-  select coalesce(sum(applied_amount), 0), coalesce(sum(final_amount), 0), count(*)
-  into v_old_appl, v_old_final, v_count
-  from invoice_lines
-  where batch_id = p_batch_id and shipper_id = p_shipper_id and shipper_name_candidate = p_candidate_name;
+  create temporary table if not exists tmp_unassign_before (
+    reservation_type text, cnt bigint, t_appl numeric, t_final numeric
+  ) on commit drop;
+  truncate tmp_unassign_before;
 
+  insert into tmp_unassign_before
+  select reservation_type, count(*), coalesce(sum(applied_amount), 0), coalesce(sum(final_amount), 0)
+  from invoice_lines
+  where batch_id = p_batch_id and shipper_id = p_shipper_id and shipper_name_candidate = p_candidate_name
+  group by reservation_type;
+
+  select coalesce(sum(cnt), 0) into v_count from tmp_unassign_before;
   if v_count = 0 then
     return 0;
   end if;
+
+  create temporary table if not exists tmp_unassign_after (
+    reservation_type text, cnt bigint, t_orig numeric, t_final numeric
+  ) on commit drop;
+  truncate tmp_unassign_after;
 
   with upd as (
     update invoice_lines
     set shipper_id = null,
         applied_amount = total_fee
     where batch_id = p_batch_id and shipper_id = p_shipper_id and shipper_name_candidate = p_candidate_name
-    returning total_fee, final_amount
+    returning reservation_type, total_fee, final_amount
   )
-  select coalesce(sum(total_fee), 0), coalesce(sum(final_amount), 0)
-  into v_new_orig, v_new_final
-  from upd;
-
-  update batch_shipper_summary
-  set line_count = line_count - v_count,
-      total_original = total_original - v_new_orig,
-      total_applied = total_applied - v_old_appl,
-      total_final = total_final - v_old_final
-  where batch_id = p_batch_id and group_key = 'shipper:' || p_shipper_id::text;
+  insert into tmp_unassign_after
+  select reservation_type, count(*), coalesce(sum(total_fee), 0), coalesce(sum(final_amount), 0)
+  from upd
+  group by reservation_type;
 
   update monthly_batches
-  set total_applied = total_applied + (v_new_orig - v_old_appl),
-      total_final = total_final + (v_new_final - v_old_final)
+  set total_applied = total_applied
+        + (select coalesce(sum(t_orig), 0) from tmp_unassign_after)
+        - (select coalesce(sum(t_appl), 0) from tmp_unassign_before),
+      total_final = total_final
+        + (select coalesce(sum(t_final), 0) from tmp_unassign_after)
+        - (select coalesce(sum(t_final), 0) from tmp_unassign_before)
   where monthly_batches.id = p_batch_id;
 
   update batch_shipper_summary
+  set line_count = line_count - v_count,
+      total_original = total_original - (select coalesce(sum(t_orig), 0) from tmp_unassign_after),
+      total_applied = total_applied - (select coalesce(sum(t_appl), 0) from tmp_unassign_before),
+      total_final = total_final - (select coalesce(sum(t_final), 0) from tmp_unassign_before)
+  where batch_id = p_batch_id and group_key = 'shipper:' || p_shipper_id::text;
+
+  update batch_shipper_type_summary bts
+  set line_count = bts.line_count - b.cnt,
+      total_original = bts.total_original - a.t_orig,
+      total_applied = bts.total_applied - b.t_appl,
+      total_final = bts.total_final - b.t_final
+  from tmp_unassign_before b
+  join tmp_unassign_after a on a.reservation_type = b.reservation_type
+  where bts.batch_id = p_batch_id and bts.group_key = 'shipper:' || p_shipper_id::text and bts.reservation_type = b.reservation_type;
+
+  update batch_shipper_summary
   set line_count = line_count + v_count,
-      total_original = total_original + v_new_orig,
-      total_applied = total_applied + v_new_orig,
-      total_final = total_final + v_new_final
+      total_original = total_original + (select coalesce(sum(t_orig), 0) from tmp_unassign_after),
+      total_applied = total_applied + (select coalesce(sum(t_orig), 0) from tmp_unassign_after),
+      total_final = total_final + (select coalesce(sum(t_final), 0) from tmp_unassign_after)
   where batch_id = p_batch_id and group_key = 'unregistered';
+
+  insert into batch_shipper_type_summary (batch_id, group_key, reservation_type, line_count, total_original, total_applied, total_final)
+  select p_batch_id, 'unregistered', reservation_type, cnt, t_orig, t_orig, t_final
+  from tmp_unassign_after
+  on conflict (batch_id, group_key, reservation_type) do update set
+    line_count = batch_shipper_type_summary.line_count + excluded.line_count,
+    total_original = batch_shipper_type_summary.total_original + excluded.total_original,
+    total_applied = batch_shipper_type_summary.total_applied + excluded.total_applied,
+    total_final = batch_shipper_type_summary.total_final + excluded.total_final;
 
   insert into batch_shipper_summary
     (batch_id, group_key, shipper_id, shipper_name, sender_name, line_count, total_original, total_applied, total_final)
-  values (p_batch_id, 'sender:' || p_candidate_name, null, p_candidate_name, p_candidate_name, v_count, v_new_orig, v_new_orig, v_new_final)
+  select
+    p_batch_id, 'sender:' || p_candidate_name, null, p_candidate_name, p_candidate_name,
+    v_count,
+    (select coalesce(sum(t_orig), 0) from tmp_unassign_after),
+    (select coalesce(sum(t_orig), 0) from tmp_unassign_after),
+    (select coalesce(sum(t_final), 0) from tmp_unassign_after)
   on conflict (batch_id, group_key) do update set
+    line_count = excluded.line_count,
+    total_original = excluded.total_original,
+    total_applied = excluded.total_applied,
+    total_final = excluded.total_final;
+
+  insert into batch_shipper_type_summary (batch_id, group_key, reservation_type, line_count, total_original, total_applied, total_final)
+  select p_batch_id, 'sender:' || p_candidate_name, reservation_type, cnt, t_orig, t_orig, t_final
+  from tmp_unassign_after
+  on conflict (batch_id, group_key, reservation_type) do update set
     line_count = excluded.line_count,
     total_original = excluded.total_original,
     total_applied = excluded.total_applied,

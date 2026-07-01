@@ -14,6 +14,7 @@ export default function BatchDetailPage() {
   const [breakdown, setBreakdown] = useState([])
   // '' 전체 | 'unregistered' 미등록 전체 | `s:${shipperId}` 등록 화주사 | `n:${senderName}` 반복 발송된 미등록 송화인
   const [filterKey, setFilterKey] = useState('')
+  const [typeFilter, setTypeFilter] = useState('') // '' 전체 | '일반' | '반품'
   const [registeringName, setRegisteringName] = useState(null)
   const [q, setQ] = useState('')
   const [qInput, setQInput] = useState('')
@@ -45,10 +46,16 @@ export default function BatchDetailPage() {
 
   // filterKey를 lines/summary API에 쓸 쿼리 파라미터로 변환
   function filterParams() {
-    if (filterKey === 'unregistered') return { shipper_id: 'unregistered' }
-    if (filterKey.startsWith('s:')) return { shipper_id: filterKey.slice(2) }
-    if (filterKey.startsWith('n:')) return { sender_name: filterKey.slice(2) }
-    return {}
+    const base =
+      filterKey === 'unregistered'
+        ? { shipper_id: 'unregistered' }
+        : filterKey.startsWith('s:')
+          ? { shipper_id: filterKey.slice(2) }
+          : filterKey.startsWith('n:')
+            ? { sender_name: filterKey.slice(2) }
+            : {}
+    if (typeFilter) base.type = typeFilter
+    return base
   }
 
   async function loadLines() {
@@ -79,7 +86,7 @@ export default function BatchDetailPage() {
   useEffect(() => {
     loadLines()
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [batchId, filterKey, q, page])
+  }, [batchId, filterKey, typeFilter, q, page])
 
   async function handleRegisterSender(senderName) {
     setRegisteringName(senderName)
@@ -278,14 +285,22 @@ export default function BatchDetailPage() {
                         setFilterKey(key)
                         setPage(1)
                       }}
+                      title={`일반 ${Number(b.general_count || 0).toLocaleString()} / 반품 ${Number(b.return_count || 0).toLocaleString()}`}
                       className="flex flex-1 items-center justify-between overflow-hidden text-left"
                     >
                       <span className="truncate">
                         {isUnregisteredRepeat && <span className="mr-1 text-amber-500">●</span>}
                         {b.shipper_name}
                       </span>
-                      <span className="tabular ml-2 shrink-0 text-xs text-slate-400 dark:text-slate-500">
-                        {Number(b.line_count).toLocaleString()}
+                      <span className="ml-2 flex shrink-0 items-baseline gap-1">
+                        <span className="tabular text-xs text-slate-400 dark:text-slate-500">
+                          {Number(b.line_count).toLocaleString()}
+                        </span>
+                        {Number(b.return_count) > 0 && (
+                          <span className="tabular text-[10px] text-rose-400 dark:text-rose-500">
+                            (반품 {Number(b.return_count).toLocaleString()})
+                          </span>
+                        )}
                       </span>
                     </button>
                     {isUnregisteredRepeat && (
@@ -350,22 +365,47 @@ export default function BatchDetailPage() {
             </div>
           )}
 
-          <form onSubmit={handleSearch} className="mb-3 flex gap-2">
-            <Input
-              placeholder="운송장번호 / 송화인 / 받는분 검색"
-              className="flex-1"
-              value={qInput}
-              onChange={(e) => setQInput(e.target.value)}
-            />
-            <Button type="submit" variant="secondary">
-              검색
-            </Button>
-          </form>
+          <div className="mb-3 flex flex-wrap items-center gap-3">
+            <div className="inline-flex rounded-md border border-slate-200 p-0.5 dark:border-slate-800">
+              {[
+                { value: '', label: '전체' },
+                { value: '일반', label: '일반' },
+                { value: '반품', label: '반품' },
+              ].map((opt) => (
+                <button
+                  key={opt.value}
+                  onClick={() => {
+                    setTypeFilter(opt.value)
+                    setPage(1)
+                  }}
+                  className={`rounded px-3 py-1 text-sm transition ${
+                    typeFilter === opt.value
+                      ? 'bg-cyan-600 text-white dark:bg-cyan-500 dark:text-slate-950'
+                      : 'text-slate-500 hover:bg-slate-100 dark:text-slate-400 dark:hover:bg-slate-800'
+                  }`}
+                >
+                  {opt.label}
+                </button>
+              ))}
+            </div>
+            <form onSubmit={handleSearch} className="flex flex-1 gap-2">
+              <Input
+                placeholder="운송장번호 / 송화인 / 받는분 검색"
+                className="flex-1"
+                value={qInput}
+                onChange={(e) => setQInput(e.target.value)}
+              />
+              <Button type="submit" variant="secondary">
+                검색
+              </Button>
+            </form>
+          </div>
 
           <Table>
             <THead>
               <Th>집화일자</Th>
               <Th>운송장번호</Th>
+              <Th>구분</Th>
               <Th>송화인</Th>
               <Th>받는분</Th>
               <Th className="text-right">원본운임</Th>
@@ -378,6 +418,17 @@ export default function BatchDetailPage() {
                 <Tr key={l.id}>
                   <Td className="text-slate-500 dark:text-slate-500">{l.pickup_date}</Td>
                   <Td>{l.tracking_no}</Td>
+                  <Td className="whitespace-nowrap">
+                    <span
+                      className={`whitespace-nowrap rounded px-1.5 py-0.5 text-xs ${
+                        l.reservation_type === '반품'
+                          ? 'bg-rose-50 text-rose-600 dark:bg-rose-500/10 dark:text-rose-400'
+                          : 'bg-slate-100 text-slate-500 dark:bg-slate-800 dark:text-slate-400'
+                      }`}
+                    >
+                      {l.reservation_type}
+                    </span>
+                  </Td>
                   <Td>{l.sender_name}</Td>
                   <Td>{l.receiver_name}</Td>
                   <Td className="tabular text-right text-slate-500 dark:text-slate-500">{Number(l.total_fee).toLocaleString()}</Td>
@@ -421,7 +472,7 @@ export default function BatchDetailPage() {
                   </Td>
                 </Tr>
               ))}
-              {!loading && lines.length === 0 && <EmptyRow colSpan={8}>조회된 내역이 없습니다.</EmptyRow>}
+              {!loading && lines.length === 0 && <EmptyRow colSpan={9}>조회된 내역이 없습니다.</EmptyRow>}
             </TBody>
           </Table>
 
