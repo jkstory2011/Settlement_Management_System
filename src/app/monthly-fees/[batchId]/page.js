@@ -25,6 +25,8 @@ export default function BatchDetailPage() {
   const [editingId, setEditingId] = useState(null)
   const [editValue, setEditValue] = useState('')
   const [recomputing, setRecomputing] = useState(false)
+  const [mergingName, setMergingName] = useState(null)
+  const [dragOverShipperId, setDragOverShipperId] = useState(null)
   const pageSize = 50
 
   async function loadBreakdown() {
@@ -97,6 +99,28 @@ export default function BatchDetailPage() {
       alert(err.message)
     } finally {
       setRegisteringName(null)
+    }
+  }
+
+  // 반복 미등록 이름을 이미 등록된 화주사에 드래그 앤 드롭으로 병합
+  async function handleMergeCandidate(shipperId, senderName) {
+    setMergingName(senderName)
+    try {
+      const res = await fetch(`/api/batches/${batchId}/merge-candidate`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ shipper_id: shipperId, candidate_name: senderName }),
+      })
+      const json = await res.json()
+      if (!res.ok) throw new Error(json.error || '병합 실패')
+
+      setFilterKey(`s:${shipperId}`)
+      setPage(1)
+      await Promise.all([loadBreakdown(), loadLines()])
+    } catch (err) {
+      alert(err.message)
+    } finally {
+      setMergingName(null)
     }
   }
 
@@ -181,12 +205,40 @@ export default function BatchDetailPage() {
             {breakdown.map((b) => {
               const key = b.sender_name ? `n:${b.sender_name}` : b.shipper_id == null ? 'unregistered' : `s:${b.shipper_id}`
               const isUnregisteredRepeat = Boolean(b.sender_name)
+              const isRegisteredShipper = b.shipper_id != null
               const isActive = filterKey === key
+              const isDragOver = isRegisteredShipper && dragOverShipperId === b.shipper_id
               return (
                 <li key={key}>
                   <div
+                    draggable={isUnregisteredRepeat}
+                    onDragStart={(e) => {
+                      if (!isUnregisteredRepeat) return
+                      e.dataTransfer.setData('text/plain', b.sender_name)
+                      e.dataTransfer.effectAllowed = 'move'
+                    }}
+                    onDragOver={(e) => {
+                      if (!isRegisteredShipper) return
+                      e.preventDefault()
+                      e.dataTransfer.dropEffect = 'move'
+                    }}
+                    onDragEnter={() => {
+                      if (isRegisteredShipper) setDragOverShipperId(b.shipper_id)
+                    }}
+                    onDragLeave={() => {
+                      if (isRegisteredShipper) setDragOverShipperId((prev) => (prev === b.shipper_id ? null : prev))
+                    }}
+                    onDrop={(e) => {
+                      if (!isRegisteredShipper) return
+                      e.preventDefault()
+                      setDragOverShipperId(null)
+                      const senderName = e.dataTransfer.getData('text/plain')
+                      if (senderName) handleMergeCandidate(b.shipper_id, senderName)
+                    }}
                     className={`flex w-full items-center gap-1 rounded px-2 py-1 transition hover:bg-slate-100 dark:hover:bg-slate-800 ${
                       isActive ? 'bg-cyan-50 font-medium text-cyan-700 dark:bg-cyan-500/10 dark:text-cyan-300' : ''
+                    } ${isUnregisteredRepeat ? 'cursor-grab active:cursor-grabbing' : ''} ${
+                      isDragOver ? 'ring-2 ring-cyan-400 ring-inset' : ''
                     }`}
                   >
                     <button
@@ -207,11 +259,11 @@ export default function BatchDetailPage() {
                     {isUnregisteredRepeat && (
                       <button
                         onClick={() => handleRegisterSender(b.sender_name)}
-                        disabled={registeringName === b.sender_name}
+                        disabled={registeringName === b.sender_name || mergingName === b.sender_name}
                         title="화주사로 등록"
                         className="shrink-0 rounded border border-cyan-200 px-1.5 py-0.5 text-xs text-cyan-700 transition hover:bg-cyan-50 disabled:opacity-50 dark:border-cyan-800 dark:text-cyan-400 dark:hover:bg-cyan-500/10"
                       >
-                        {registeringName === b.sender_name ? '등록중' : '등록'}
+                        {registeringName === b.sender_name ? '등록중' : mergingName === b.sender_name ? '병합중' : '등록'}
                       </button>
                     )}
                   </div>
@@ -220,7 +272,8 @@ export default function BatchDetailPage() {
             })}
           </ul>
           <p className="mt-2 px-1 text-xs text-slate-400 dark:text-slate-500">
-            ● 표시는 화주사 미등록이지만 2건 이상 반복 발송된 송화인입니다.
+            ● 표시는 화주사 미등록이지만 2건 이상 반복 발송된 송화인입니다. 끌어서 기존 화주사 위에 놓으면 그
+            화주사의 별칭으로 병합됩니다.
           </p>
         </Card>
 
