@@ -15,6 +15,7 @@ export default function BatchDetailPage() {
   // '' 전체 | 'unregistered' 미등록 전체 | `s:${shipperId}` 등록 화주사 | `n:${senderName}` 반복 발송된 미등록 송화인
   const [filterKey, setFilterKey] = useState('')
   const [typeFilter, setTypeFilter] = useState('') // '' 전체 | '일반' | '반품'
+  const [packageFilter, setPackageFilter] = useState('') // '' 전체 | '단품' | '합포장'
   const [registeringName, setRegisteringName] = useState(null)
   const [q, setQ] = useState('')
   const [qInput, setQInput] = useState('')
@@ -55,6 +56,7 @@ export default function BatchDetailPage() {
             ? { sender_name: filterKey.slice(2) }
             : {}
     if (typeFilter) base.type = typeFilter
+    if (packageFilter) base.package = packageFilter
     return base
   }
 
@@ -86,7 +88,7 @@ export default function BatchDetailPage() {
   useEffect(() => {
     loadLines()
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [batchId, filterKey, typeFilter, q, page])
+  }, [batchId, filterKey, typeFilter, packageFilter, q, page])
 
   async function handleRegisterSender(senderName) {
     setRegisteringName(senderName)
@@ -388,6 +390,28 @@ export default function BatchDetailPage() {
                 </button>
               ))}
             </div>
+            <div className="inline-flex rounded-md border border-slate-200 p-0.5 dark:border-slate-800">
+              {[
+                { value: '', label: '전체' },
+                { value: '단품', label: '단품' },
+                { value: '합포장', label: '합포장' },
+              ].map((opt) => (
+                <button
+                  key={opt.value}
+                  onClick={() => {
+                    setPackageFilter(opt.value)
+                    setPage(1)
+                  }}
+                  className={`rounded px-3 py-1 text-sm transition ${
+                    packageFilter === opt.value
+                      ? 'bg-cyan-600 text-white dark:bg-cyan-500 dark:text-slate-950'
+                      : 'text-slate-500 hover:bg-slate-100 dark:text-slate-400 dark:hover:bg-slate-800'
+                  }`}
+                >
+                  {opt.label}
+                </button>
+              ))}
+            </div>
             <form onSubmit={handleSearch} className="flex flex-1 gap-2">
               <Input
                 placeholder="운송장번호 / 송화인 / 받는분 검색"
@@ -434,6 +458,11 @@ export default function BatchDetailPage() {
                   <Td>{l.sender_name}</Td>
                   <Td>{l.receiver_name}</Td>
                   <Td className="max-w-xs truncate" title={l.item_name}>
+                    {l.is_bundled && (
+                      <span className="mr-1 rounded bg-violet-50 px-1.5 py-0.5 text-[10px] text-violet-600 dark:bg-violet-500/10 dark:text-violet-400">
+                        합포장
+                      </span>
+                    )}
                     {l.item_name}
                   </Td>
                   <Td className="tabular text-right">{l.qty}</Td>

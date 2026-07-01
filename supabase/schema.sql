@@ -103,7 +103,9 @@ create table if not exists invoice_lines (
   -- 예약구분에 따라 화주사가 되는 쪽이 다름: 일반은 송화인, 반품은 받는분이 화주사
   shipper_name_candidate text generated always as (
     case when reservation_type = '반품' then receiver_name else sender_name end
-  ) stored
+  ) stored,
+  -- 품목명에 '$'로 여러 품목이 이어져 있으면 합포장(여러 품목을 한 박스에 묶어 보낸 건)
+  is_bundled boolean generated always as (item_name like '%$%') stored
 );
 
 create index if not exists idx_invoice_lines_batch on invoice_lines(batch_id);
@@ -112,6 +114,8 @@ create index if not exists idx_invoice_lines_batch_tracking on invoice_lines(bat
 create index if not exists idx_invoice_lines_batch_candidate on invoice_lines(batch_id, shipper_name_candidate);
 -- 목록 조회가 batch_id로 필터 후 no로 정렬하는데, 이 인덱스가 없으면 21만 건을 매번 통째로 정렬해야 해서 느려짐
 create index if not exists idx_invoice_lines_batch_no on invoice_lines(batch_id, no);
+-- 합포장은 전체 대비 극소수라 이 인덱스로 필터링하면 라이브 집계도 빠름
+create index if not exists idx_invoice_lines_batch_bundled on invoice_lines(batch_id, is_bundled);
 -- 일반/반품 필터 + 정렬을 위한 인덱스 (화주사 필터와 조합될 때도 정렬 성능 확보)
 create index if not exists idx_invoice_lines_batch_shipper_no on invoice_lines(batch_id, shipper_id, no);
 create index if not exists idx_invoice_lines_batch_type_no on invoice_lines(batch_id, reservation_type, no);

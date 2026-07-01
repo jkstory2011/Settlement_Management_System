@@ -109,6 +109,8 @@ export async function POST(request) {
         receiver_signee: r.receiver_signee,
         delivery_date: r.delivery_date,
         delivery_branch: r.delivery_branch,
+        // 품목명에 '$'로 여러 품목이 이어져 있으면 합포장(한 박스에 여러 품목을 묶어 보낸 건)
+        is_bundled: (r.item_name || '').includes('$'),
       }
     })
 
