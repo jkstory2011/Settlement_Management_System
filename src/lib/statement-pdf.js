@@ -1,7 +1,22 @@
-import { Document, Page, Text, View, StyleSheet, renderToBuffer } from '@react-pdf/renderer'
+import path from 'node:path'
+import { Document, Page, Text, View, StyleSheet, Font, renderToBuffer } from '@react-pdf/renderer'
+
+Font.register({
+  family: 'Pretendard',
+  fonts: [
+    {
+      src: path.join(process.cwd(), 'node_modules/pretendard/dist/public/static/alternative/Pretendard-Regular.ttf'),
+      fontWeight: 'normal',
+    },
+    {
+      src: path.join(process.cwd(), 'node_modules/pretendard/dist/public/static/alternative/Pretendard-Bold.ttf'),
+      fontWeight: 'bold',
+    },
+  ],
+})
 
 const styles = StyleSheet.create({
-  page: { padding: 24, fontSize: 9 },
+  page: { padding: 24, fontSize: 9, fontFamily: 'Pretendard' },
   title: { fontSize: 14, marginBottom: 8, fontWeight: 700 },
   headerRow: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 12 },
   summaryTable: { marginBottom: 16 },
