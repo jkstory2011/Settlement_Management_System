@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server'
 import { getSupabaseAdmin } from '@/lib/supabase-server'
 import { buildStatementXlsxBuffer } from '@/lib/statement-xlsx'
+import { renderStatementPdfBuffer } from '@/lib/statement-pdf'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -20,6 +21,16 @@ export async function GET(request, { params }) {
 
   const snapshot = statement.snapshot
   const filename = `${snapshot.shipper.name}_${snapshot.batch.year_month}_v${statement.version}`
+
+  if (format === 'pdf') {
+    const buffer = await renderStatementPdfBuffer(snapshot)
+    return new NextResponse(buffer, {
+      headers: {
+        'Content-Type': 'application/pdf',
+        'Content-Disposition': `attachment; filename="${encodeURIComponent(filename)}.pdf"`,
+      },
+    })
+  }
 
   if (format === 'xlsx') {
     const buffer = buildStatementXlsxBuffer(snapshot)
