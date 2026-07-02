@@ -6,11 +6,14 @@ import Button from '@/components/ui/Button'
 import KpiCard from '@/components/ui/KpiCard'
 import { Table, THead, Th, TBody, Tr, Td, EmptyRow } from '@/components/ui/Table'
 
+const PAGE_SIZE = 200
+
 export default function StatementDetailView({ statementId, onBack }) {
   const [statement, setStatement] = useState(null)
   const [history, setHistory] = useState([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
+  const [page, setPage] = useState(1)
 
   async function load() {
     setLoading(true)
@@ -34,6 +37,7 @@ export default function StatementDetailView({ statementId, onBack }) {
   }
 
   useEffect(() => {
+    setPage(1)
     load()
   }, [statementId])
 
@@ -55,6 +59,8 @@ export default function StatementDetailView({ statementId, onBack }) {
   }
 
   const snapshot = statement.snapshot
+  const totalPages = Math.max(1, Math.ceil(snapshot.lines.length / PAGE_SIZE))
+  const pagedLines = snapshot.lines.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE)
 
   return (
     <div>
@@ -133,8 +139,8 @@ export default function StatementDetailView({ statementId, onBack }) {
         </THead>
         <TBody>
           {snapshot.lines.length === 0 && <EmptyRow colSpan={9}>명세가 없습니다.</EmptyRow>}
-          {snapshot.lines.map((l, i) => (
-            <Tr key={i}>
+          {pagedLines.map((l, i) => (
+            <Tr key={(page - 1) * PAGE_SIZE + i}>
               <Td>{l.tracking_no}</Td>
               <Td>{l.pickup_date}</Td>
               <Td>{l.reservation_type}</Td>
@@ -148,6 +154,31 @@ export default function StatementDetailView({ statementId, onBack }) {
           ))}
         </TBody>
       </Table>
+
+      {snapshot.lines.length > 0 && (
+        <div className="mt-3 flex items-center justify-between text-sm text-slate-500 dark:text-slate-400">
+          <span className="tabular">
+            총 {snapshot.lines.length.toLocaleString()}건 중{' '}
+            {(page - 1) * PAGE_SIZE + 1}-{Math.min(page * PAGE_SIZE, snapshot.lines.length)}
+          </span>
+          <div className="flex items-center gap-2">
+            <Button variant="secondary" disabled={page <= 1} onClick={() => setPage((p) => Math.max(1, p - 1))} className="px-3 py-1">
+              이전
+            </Button>
+            <span className="tabular">
+              {page} / {totalPages}
+            </span>
+            <Button
+              variant="secondary"
+              disabled={page >= totalPages}
+              onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+              className="px-3 py-1"
+            >
+              다음
+            </Button>
+          </div>
+        </div>
+      )}
     </div>
   )
 }
