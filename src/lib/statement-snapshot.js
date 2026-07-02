@@ -9,15 +9,25 @@ export async function buildStatementSnapshot(supabase, { batchId, shipperId }) {
   if (shipperError) throw new Error(shipperError.message)
   if (batchError) throw new Error(batchError.message)
 
-  const { data: lines, error: linesError } = await supabase
-    .from('invoice_lines')
-    .select(
-      'tracking_no, pickup_date, reservation_type, sender_name, receiver_name, item_name, qty, is_bundled, base_fee, other_fee, total_fee, applied_amount, final_amount'
-    )
-    .eq('batch_id', batchId)
-    .eq('shipper_id', shipperId)
-    .order('no', { ascending: true })
-  if (linesError) throw new Error(linesError.message)
+  const PAGE_SIZE = 1000
+  const lines = []
+  for (let page = 0; ; page += 1) {
+    const from = page * PAGE_SIZE
+    const to = from + PAGE_SIZE - 1
+    const { data: pageLines, error: linesError } = await supabase
+      .from('invoice_lines')
+      .select(
+        'tracking_no, pickup_date, reservation_type, sender_name, receiver_name, item_name, qty, is_bundled, base_fee, other_fee, total_fee, applied_amount, final_amount'
+      )
+      .eq('batch_id', batchId)
+      .eq('shipper_id', shipperId)
+      .order('no', { ascending: true })
+      .order('id', { ascending: true })
+      .range(from, to)
+    if (linesError) throw new Error(linesError.message)
+    lines.push(...pageLines)
+    if (pageLines.length < PAGE_SIZE) break
+  }
 
   const summary = buildSummary(lines)
 
