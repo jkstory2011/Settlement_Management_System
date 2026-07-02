@@ -1,0 +1,134 @@
+'use client'
+
+import { useEffect, useState } from 'react'
+import Card from '@/components/ui/Card'
+import Button from '@/components/ui/Button'
+import KpiCard from '@/components/ui/KpiCard'
+import { Table, THead, Th, TBody, Tr, Td, EmptyRow } from '@/components/ui/Table'
+
+export default function StatementDetailView({ statementId, onBack }) {
+  const [statement, setStatement] = useState(null)
+  const [history, setHistory] = useState([])
+  const [loading, setLoading] = useState(true)
+
+  useEffect(() => {
+    async function load() {
+      setLoading(true)
+      const [stRes, histRes] = await Promise.all([
+        fetch(`/api/statements/${statementId}`),
+        fetch(`/api/statements/${statementId}/history`),
+      ])
+      const stJson = await stRes.json()
+      const histJson = await histRes.json()
+      setStatement(stJson.statement)
+      setHistory(histJson.history || [])
+      setLoading(false)
+    }
+    load()
+  }, [statementId])
+
+  if (loading || !statement) {
+    return (
+      <Card className="p-4">
+        <p className="text-sm text-slate-500">불러오는 중...</p>
+      </Card>
+    )
+  }
+
+  const snapshot = statement.snapshot
+
+  return (
+    <div>
+      <div className="mb-4 flex items-center justify-between">
+        <Button variant="ghost" onClick={onBack}>
+          ← 목록으로
+        </Button>
+        <div className="flex gap-2">
+          <a href={`/api/statements/${statementId}/export?format=xlsx`}>
+            <Button variant="secondary">Excel 다운로드</Button>
+          </a>
+          <a href={`/api/statements/${statementId}/export?format=pdf`}>
+            <Button variant="secondary">PDF 다운로드</Button>
+          </a>
+        </div>
+      </div>
+
+      <h2 className="mb-1 text-lg font-semibold text-slate-900 dark:text-slate-100">
+        {snapshot.shipper.name} 정산서 · {snapshot.batch.year_month}
+      </h2>
+      <p className="mb-4 text-sm text-slate-500">
+        {snapshot.carrier.name} · v{statement.version} · {new Date(statement.issued_at).toLocaleString('ko-KR')} 발행
+      </p>
+
+      <div className="mb-6 grid grid-cols-3 gap-3">
+        <KpiCard
+          label="일반"
+          value={snapshot.summary.일반.line_count.toLocaleString()}
+          unit="건"
+          sub={`${snapshot.summary.일반.total_final.toLocaleString()}원`}
+        />
+        <KpiCard
+          label="반품"
+          value={snapshot.summary.반품.line_count.toLocaleString()}
+          unit="건"
+          sub={`${snapshot.summary.반품.total_final.toLocaleString()}원`}
+        />
+        <KpiCard
+          label="합계"
+          value={snapshot.summary.합계.line_count.toLocaleString()}
+          unit="건"
+          sub={`${snapshot.summary.합계.total_final.toLocaleString()}원`}
+          tone="accent"
+        />
+      </div>
+
+      {history.length > 1 && (
+        <Card className="mb-4 p-3">
+          <p className="mb-2 text-xs font-semibold text-slate-500">발행 이력</p>
+          <div className="flex flex-wrap gap-2">
+            {history.map((h) => (
+              <span
+                key={h.id}
+                className={`rounded px-2 py-1 text-xs ${
+                  h.id === statement.id ? 'bg-cyan-600 text-white' : 'bg-slate-100 dark:bg-slate-800'
+                }`}
+              >
+                v{h.version} · {new Date(h.issued_at).toLocaleDateString('ko-KR')}
+              </span>
+            ))}
+          </div>
+        </Card>
+      )}
+
+      <Table>
+        <THead>
+          <Th>송장번호</Th>
+          <Th>집화일</Th>
+          <Th>구분</Th>
+          <Th>송화인</Th>
+          <Th>수화인</Th>
+          <Th>품목</Th>
+          <Th className="text-right">수량</Th>
+          <Th className="text-right">원본운임</Th>
+          <Th className="text-right">최종금액</Th>
+        </THead>
+        <TBody>
+          {snapshot.lines.length === 0 && <EmptyRow colSpan={9}>명세가 없습니다.</EmptyRow>}
+          {snapshot.lines.map((l, i) => (
+            <Tr key={i}>
+              <Td>{l.tracking_no}</Td>
+              <Td>{l.pickup_date}</Td>
+              <Td>{l.reservation_type}</Td>
+              <Td>{l.sender_name}</Td>
+              <Td>{l.receiver_name}</Td>
+              <Td className="max-w-xs truncate">{l.item_name}</Td>
+              <Td className="tabular text-right">{l.qty}</Td>
+              <Td className="tabular text-right">{Number(l.total_fee).toLocaleString()}</Td>
+              <Td className="tabular text-right">{Number(l.final_amount).toLocaleString()}</Td>
+            </Tr>
+          ))}
+        </TBody>
+      </Table>
+    </div>
+  )
+}
