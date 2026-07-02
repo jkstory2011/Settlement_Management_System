@@ -95,8 +95,10 @@ create table if not exists invoice_lines (
   -- 화주사가 삭제되면 해당 운송장은 미등록 상태로 되돌아감
   shipper_id bigint references shippers(id) on delete set null,
   applied_amount numeric not null default 0,
-  -- true면 화주사가 수동으로 확정된 건(예: 반품 품목명 매칭으로 예외 배정) -- 재계산이
-  -- shipper_name_candidate 이름매칭으로 shipper_id를 덮어쓰지 않음
+  -- assign_shipper_to_candidate/match_return_candidates_to_general 등으로 화주사가 수동 확정된 건(예:
+  -- 반품 품목명 매칭으로 예외 배정)에는 true. 재계산이 shipper_name_candidate 이름매칭으로 shipper_id를
+  -- 덮어쓰지 않도록 막는 용도. 병합 해제(unassign_shipper_candidate) 시 반드시 false로 되돌려야 한다 --
+  -- 안 그러면 그 라인은 이후 이름매칭 대상에서 영구히 제외된다.
   shipper_manual boolean not null default false,
   is_manual_edit boolean not null default false,
   manual_amount numeric,
@@ -108,8 +110,10 @@ create table if not exists invoice_lines (
   shipper_name_candidate text generated always as (
     case when reservation_type = '반품' then receiver_name else sender_name end
   ) stored,
-  -- 품목명에 '$'로 여러 품목이 이어져 있으면 합포장(여러 품목을 한 박스에 묶어 보낸 건)
-  is_bundled boolean generated always as (item_name like '%$%') stored
+  -- 품목명에 '$'로 여러 품목이 이어져 있으면 합포장(여러 품목을 한 박스에 묶어 보낸 건).
+  -- generated column이 아니라 평범한 컬럼이다: 업로드 API가 매번 이 규칙으로 직접 계산해서 넣는다
+  -- (기존 행은 backfill_is_bundled_chunk로 한 번 채웠음. functions.sql 참고).
+  is_bundled boolean not null default false
 );
 
 create index if not exists idx_invoice_lines_batch on invoice_lines(batch_id);

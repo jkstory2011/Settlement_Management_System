@@ -82,7 +82,7 @@ export async function POST(request) {
       })
       const shipperId = resolveShipperId(candidateName, shipperIndex)
       const appliedAmount = computeAppliedAmount(
-        { shipperId, baseFee: r.base_fee, otherFee: r.other_fee, totalFee: r.total_fee },
+        { shipperId, baseFee: r.base_fee, otherFee: r.other_fee, totalFee: r.total_fee, pickupDate: r.pickup_date },
         tierIndex
       )
       return {
@@ -134,6 +134,14 @@ export async function POST(request) {
         .from('monthly_batches')
         .update({ status: 'error', error_message: String(error.message || error) })
         .eq('id', batchId)
+      // 실패 직전에 기존 라인을 이미 지웠을 수 있으므로(재업로드 케이스), 캐시/합계를 현재 실제 라인
+      // 상태(0건 또는 일부만 삽입된 상태)로 다시 맞춰준다. 안 그러면 대시보드에 실패 이전의 옛 합계가
+      // 그대로 남아 이 배치가 정상인 것처럼 보인다.
+      try {
+        await refreshBatchAggregates(supabase, batchId)
+      } catch {
+        // 재집계 자체가 실패해도 원래 에러를 그대로 응답한다
+      }
     }
     return NextResponse.json({ error: String(error.message || error) }, { status: 500 })
   }

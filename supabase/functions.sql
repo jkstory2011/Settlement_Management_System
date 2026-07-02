@@ -338,7 +338,7 @@ begin
     coalesce(t.contract_price + c.other_fee, c.total_fee)
   from (
     select il.id, il.base_fee, il.other_fee, il.total_fee, il.shipper_name_candidate,
-           il.shipper_manual, il.shipper_id as cur_shipper_id
+           il.shipper_manual, il.shipper_id as cur_shipper_id, il.pickup_date
     from invoice_lines il
     where il.batch_id = p_batch_id
       and il.id > p_after_id
@@ -351,6 +351,8 @@ begin
     from shipper_rate_tiers srt
     where srt.shipper_id = case when c.shipper_manual then c.cur_shipper_id else sn.shipper_id end
       and srt.cj_base_fee = c.base_fee
+      -- 집화일 이후 등록된(=그 시점엔 적용되지 않았을) 단가는 제외. 집화일이 없으면 과거 동작대로 최신 단가로 폴백.
+      and (c.pickup_date is null or srt.effective_from <= c.pickup_date)
     order by srt.effective_from desc
     limit 1
   ) t on (case when c.shipper_manual then c.cur_shipper_id else sn.shipper_id end) is not null;
@@ -407,6 +409,7 @@ begin
       select srt.contract_price
       from shipper_rate_tiers srt
       where srt.shipper_id = p_shipper_id and srt.cj_base_fee = il.base_fee
+        and (il.pickup_date is null or srt.effective_from <= il.pickup_date)
       order by srt.effective_from desc
       limit 1
     ) t on true
@@ -520,7 +523,9 @@ begin
   with upd as (
     update invoice_lines
     set shipper_id = null,
-        applied_amount = total_fee
+        applied_amount = total_fee,
+        -- 리셋 안 하면 이 라인은 향후 재계산에서 이름매칭 대상에서 영구히 제외됨(shipper_manual=true가 계속 우선함)
+        shipper_manual = false
     where batch_id = p_batch_id and shipper_id = p_shipper_id and shipper_name_candidate = p_candidate_name
     returning reservation_type, total_fee, final_amount
   )
@@ -652,6 +657,7 @@ begin
     left join lateral (
       select srt.contract_price from shipper_rate_tiers srt
       where srt.shipper_id = n.shipper_id and srt.cj_base_fee = il.base_fee
+        and (il.pickup_date is null or srt.effective_from <= il.pickup_date)
       order by srt.effective_from desc limit 1
     ) t on n.shipper_id is not null
     where il.id = any(p_line_ids)
@@ -814,5 +820,96 @@ begin
       )));
 
   return query select v_updated, coalesce(v_matched, 0);
+end;
+$$;
+
+-- 반품 건의 받는분에 물류대행사 이름 등 화주사가 아닌 값이 찍혀 미등록으로 잡힌 경우를 위한 도구.
+-- 반품의 (송화인+품목명)을 일반 건의 (받는분+품목명 접두어)와 매칭해 원래 화주사를 찾아 이관하고,
+-- 매칭되는 화주사가 하나로 좁혀지지 않으면 건드리지 않고 미등록으로 남긴다.
+-- 캐시(batch_shipper_summary 등) 갱신은 하지 않는다 -- 호출부(match-returns API)가 매번
+-- refreshBatchAggregates로 전체 재집계를 하므로 델타 갱신을 별도로 넣지 않았다.
+create or replace function match_return_candidates_to_general(p_batch_id bigint, p_candidate_names text[])
+returns table (matched_count integer, unmatched_count integer)
+language plpgsql
+as $$
+declare
+  v_matched integer;
+  v_unmatched integer;
+begin
+  create temporary table if not exists tmp_match_staging (
+    id bigint primary key,
+    shipper_id bigint,
+    new_applied_amount numeric
+  ) on commit drop;
+  truncate tmp_match_staging;
+
+  insert into tmp_match_staging (id, shipper_id, new_applied_amount)
+  with cand as (
+    select r.id, r.receiver_name, r.sender_name, r.item_name, r.base_fee, r.other_fee, r.total_fee, r.pickup_date
+    from invoice_lines r
+    where r.batch_id = p_batch_id and r.reservation_type = '반품'
+      and r.shipper_id is null
+      and r.receiver_name = any(p_candidate_names)
+  ),
+  joined as (
+    select c.id, c.item_name, c.base_fee, c.other_fee, c.total_fee, c.pickup_date,
+           g.item_name as g_item, g.shipper_id as g_shipper_id
+    from cand c
+    join invoice_lines g
+      on g.batch_id = p_batch_id and g.reservation_type = '일반' and g.receiver_name = c.sender_name
+  ),
+  matched as (
+    select id, base_fee, other_fee, total_fee, pickup_date, min(g_shipper_id) as shipper_id
+    from joined
+    where g_item like item_name || '%'
+    group by id, base_fee, other_fee, total_fee, pickup_date
+    having count(distinct g_shipper_id) = 1
+  )
+  select m.id, m.shipper_id,
+    coalesce(t.contract_price + m.other_fee, m.total_fee)
+  from matched m
+  left join lateral (
+    select srt.contract_price from shipper_rate_tiers srt
+    where srt.shipper_id = m.shipper_id and srt.cj_base_fee = m.base_fee
+      and (m.pickup_date is null or srt.effective_from <= m.pickup_date)
+    order by srt.effective_from desc limit 1
+  ) t on true;
+
+  select count(*) into v_matched from tmp_match_staging;
+
+  update invoice_lines il
+  set shipper_id = s.shipper_id, applied_amount = s.new_applied_amount, shipper_manual = true
+  from tmp_match_staging s
+  where il.id = s.id;
+
+  select count(*) into v_unmatched
+  from invoice_lines r
+  where r.batch_id = p_batch_id and r.reservation_type = '반품'
+    and r.shipper_id is null
+    and r.receiver_name = any(p_candidate_names);
+
+  return query select v_matched, v_unmatched;
+end;
+$$;
+
+-- is_bundled 컬럼을 나중에(기존 행이 이미 있는 상태에서) 추가했을 때 한 번 돌린 백필용 함수.
+-- 신규 업로드는 upload API가 매번 is_bundled를 직접 계산해서 넣으므로 평소엔 호출되지 않는다.
+create or replace function backfill_is_bundled_chunk(p_after_id bigint, p_limit integer default 20000)
+returns table (last_id bigint, updated_count integer)
+language plpgsql
+as $$
+begin
+  return query
+  with chunk as (
+    select id from invoice_lines where id > p_after_id order by id limit p_limit
+  ),
+  upd as (
+    update invoice_lines il
+    set is_bundled = (il.item_name like '%$%')
+    from chunk c
+    where il.id = c.id
+    returning il.id
+  )
+  select max(upd.id), count(*)::integer from upd;
 end;
 $$;
