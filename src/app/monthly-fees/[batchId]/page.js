@@ -8,6 +8,7 @@ import KpiCard from '@/components/ui/KpiCard'
 import PageHeader from '@/components/ui/PageHeader'
 import { Input } from '@/components/ui/Input'
 import { Table, THead, Th, TBody, Tr, Td, EmptyRow } from '@/components/ui/Table'
+import StatementsTab from './StatementsTab'
 
 const LINES_COL_STORAGE_KEY = 'monthly-fees-lines-col-widths'
 const PAGE_SIZE_STORAGE_KEY = 'monthly-fees-lines-page-size'
@@ -440,6 +441,7 @@ export default function BatchDetailPage() {
         {[
           { value: 'lines', label: '라인 조회' },
           { value: 'shippers', label: '화주사별 건수' },
+          { value: 'statements', label: '정산서 발행' },
         ].map((tab) => (
           <button
             key={tab.value}
@@ -618,6 +620,8 @@ export default function BatchDetailPage() {
           </p>
         </Card>
       )}
+
+      {activeTab === 'statements' && <StatementsTab batchId={batchId} />}
 
       {activeTab === 'lines' && (
         <section>
