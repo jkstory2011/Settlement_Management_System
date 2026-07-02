@@ -154,3 +154,21 @@ create table if not exists batch_shipper_type_summary (
   total_final numeric not null default 0,
   primary key (batch_id, group_key, reservation_type)
 );
+
+-- 화주사 정산서 발행 이력. 발행 시점 데이터를 snapshot(jsonb)에 통째로 얼려서 저장한다.
+-- 이후 invoice_lines/shippers가 바뀌어도 이미 발행된 정산서는 그대로 유지되고,
+-- 재발행하면 새 version이 추가된다 (기존 버전은 삭제하지 않음).
+create table if not exists shipper_statements (
+  id bigint generated always as identity primary key,
+  batch_id bigint not null references monthly_batches(id) on delete cascade,
+  shipper_id bigint not null references shippers(id),
+  version integer not null default 1,
+  issued_at timestamptz not null default now(),
+  line_count integer not null,
+  total_final numeric not null,
+  snapshot jsonb not null,
+  unique (batch_id, shipper_id, version)
+);
+
+create index if not exists idx_shipper_statements_batch_shipper
+  on shipper_statements(batch_id, shipper_id, version desc);
