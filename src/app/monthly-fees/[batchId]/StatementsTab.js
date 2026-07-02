@@ -20,6 +20,7 @@ export default function StatementsTab({ batchId }) {
     try {
       const res = await fetch(`/api/batches/${batchId}/statements`)
       const json = await res.json()
+      if (!res.ok) throw new Error(json.error || '목록을 불러오지 못했습니다.')
       setRows(json.shippers || [])
     } catch (err) {
       setError(err.message || '데이터 로드에 실패했습니다.')

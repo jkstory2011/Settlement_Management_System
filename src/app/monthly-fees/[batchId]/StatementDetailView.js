@@ -22,6 +22,8 @@ export default function StatementDetailView({ statementId, onBack }) {
       ])
       const stJson = await stRes.json()
       const histJson = await histRes.json()
+      if (!stRes.ok) throw new Error(stJson.error || '정산서를 불러오지 못했습니다.')
+      if (!histRes.ok) throw new Error(histJson.error || '이력을 불러오지 못했습니다.')
       setStatement(stJson.statement)
       setHistory(histJson.history || [])
     } catch (err) {
