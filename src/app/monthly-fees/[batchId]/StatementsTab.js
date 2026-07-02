@@ -9,16 +9,23 @@ import StatementDetailView from './StatementDetailView'
 export default function StatementsTab({ batchId }) {
   const [rows, setRows] = useState([])
   const [loading, setLoading] = useState(true)
+  const [error, setError] = useState(null)
   const [issuingId, setIssuingId] = useState(null)
   const [bulkIssuing, setBulkIssuing] = useState(false)
   const [openStatementId, setOpenStatementId] = useState(null)
 
   async function load() {
     setLoading(true)
-    const res = await fetch(`/api/batches/${batchId}/statements`)
-    const json = await res.json()
-    setRows(json.shippers || [])
-    setLoading(false)
+    setError(null)
+    try {
+      const res = await fetch(`/api/batches/${batchId}/statements`)
+      const json = await res.json()
+      setRows(json.shippers || [])
+    } catch (err) {
+      setError(err.message || '데이터 로드에 실패했습니다.')
+    } finally {
+      setLoading(false)
+    }
   }
 
   useEffect(() => {
@@ -63,6 +70,15 @@ export default function StatementsTab({ batchId }) {
 
   if (openStatementId) {
     return <StatementDetailView statementId={openStatementId} onBack={() => setOpenStatementId(null)} />
+  }
+
+  if (error) {
+    return (
+      <Card className="p-4">
+        <p className="mb-2 text-sm text-rose-600 dark:text-rose-400">{error}</p>
+        <Button variant="secondary" onClick={load}>다시 시도</Button>
+      </Card>
+    )
   }
 
   return (

@@ -10,10 +10,12 @@ export default function StatementDetailView({ statementId, onBack }) {
   const [statement, setStatement] = useState(null)
   const [history, setHistory] = useState([])
   const [loading, setLoading] = useState(true)
+  const [error, setError] = useState(null)
 
-  useEffect(() => {
-    async function load() {
-      setLoading(true)
+  async function load() {
+    setLoading(true)
+    setError(null)
+    try {
       const [stRes, histRes] = await Promise.all([
         fetch(`/api/statements/${statementId}`),
         fetch(`/api/statements/${statementId}/history`),
@@ -22,10 +24,25 @@ export default function StatementDetailView({ statementId, onBack }) {
       const histJson = await histRes.json()
       setStatement(stJson.statement)
       setHistory(histJson.history || [])
+    } catch (err) {
+      setError(err.message || '데이터 로드에 실패했습니다.')
+    } finally {
       setLoading(false)
     }
+  }
+
+  useEffect(() => {
     load()
   }, [statementId])
+
+  if (error) {
+    return (
+      <Card className="p-4">
+        <p className="mb-2 text-sm text-rose-600 dark:text-rose-400">{error}</p>
+        <Button variant="secondary" onClick={load}>다시 시도</Button>
+      </Card>
+    )
+  }
 
   if (loading || !statement) {
     return (
