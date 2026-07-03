@@ -5,14 +5,18 @@ import { useParams } from 'next/navigation'
 import Card from '@/components/ui/Card'
 import Button from '@/components/ui/Button'
 import PageHeader from '@/components/ui/PageHeader'
-import { Label, Input } from '@/components/ui/Input'
+import { Label, Input, Select } from '@/components/ui/Input'
 import { Table, THead, Th, TBody, Tr, Td, EmptyRow } from '@/components/ui/Table'
+
+// CJ대한통운이 실제로 쓰는 타입 구분. 원본 내역서에는 이 정보가 없어(운임구분 컬럼은 신용/착불 여부이고,
+// 같은 기본운임 금액이 항상 같은 타입을 의미하지도 않음) 화주사와 계약한 금액을 참고용으로만 기록해둔다.
+const CJ_TYPES = ['극소', '소', '중', '대1', '대2', '이형', '취급제한']
 
 export default function ShipperRatesPage() {
   const { id } = useParams()
   const [rates, setRates] = useState([])
   const [shipperName, setShipperName] = useState('')
-  const [form, setForm] = useState({ cj_base_fee: '', contract_price: '' })
+  const [form, setForm] = useState({ cj_type: '', contract_price: '' })
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(true)
 
@@ -39,14 +43,14 @@ export default function ShipperRatesPage() {
     const res = await fetch(`/api/shippers/${id}/rates`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ cj_base_fee: form.cj_base_fee, contract_price: form.contract_price }),
+      body: JSON.stringify({ cj_type: form.cj_type, contract_price: form.contract_price }),
     })
     const json = await res.json()
     if (!res.ok) {
       setError(json.error || '등록 실패')
       return
     }
-    setForm({ cj_base_fee: '', contract_price: '' })
+    setForm({ cj_type: '', contract_price: '' })
     load()
   }
 
@@ -54,6 +58,9 @@ export default function ShipperRatesPage() {
     await fetch(`/api/shippers/${id}/rates/${rateId}`, { method: 'DELETE' })
     load()
   }
+
+  const registeredTypes = new Set(rates.map((r) => r.cj_type))
+  const sortedRates = [...rates].sort((a, b) => CJ_TYPES.indexOf(a.cj_type) - CJ_TYPES.indexOf(b.cj_type))
 
   return (
     <main>
@@ -65,21 +72,28 @@ export default function ShipperRatesPage() {
       />
 
       <p className="mb-4 text-sm text-slate-500 dark:text-slate-400">
-        CJ대한통운 원본 내역서의 기본운임 값(구간 식별자)별로 이 화주사에게 청구할 계약 단가를 등록합니다.
-        등록되지 않은 구간은 원본 CJ운임(총운임)을 그대로 사용합니다.
+        CJ대한통운 타입(극소/소/중/대1/대2/이형/취급제한)별로 이 화주사와 실제 계약한 단가를 기록해둡니다.
+        택배사 청구 금액과는 무관하며, 원본 내역서를 계약단가로 수정할 때 참고용으로 확인하는 표입니다.
       </p>
 
       <Card className="mb-6 p-4">
         <form onSubmit={handleCreate} className="flex flex-wrap items-end gap-3">
           <div>
-            <Label>CJ 기본운임(구간)</Label>
-            <Input
+            <Label>CJ대한통운 타입(구간)</Label>
+            <Select
               required
-              type="number"
               className="w-40"
-              value={form.cj_base_fee}
-              onChange={(e) => setForm({ ...form, cj_base_fee: e.target.value })}
-            />
+              value={form.cj_type}
+              onChange={(e) => setForm({ ...form, cj_type: e.target.value })}
+            >
+              <option value="">선택하세요</option>
+              {CJ_TYPES.map((t) => (
+                <option key={t} value={t}>
+                  {t}
+                  {registeredTypes.has(t) ? ' (등록됨)' : ''}
+                </option>
+              ))}
+            </Select>
           </div>
           <div>
             <Label>계약 단가</Label>
@@ -101,15 +115,15 @@ export default function ShipperRatesPage() {
       ) : (
         <Table>
           <THead>
-            <Th>CJ 기본운임(구간)</Th>
+            <Th>CJ대한통운 타입(구간)</Th>
             <Th>계약 단가</Th>
             <Th>적용 시작일</Th>
             <Th></Th>
           </THead>
           <TBody>
-            {rates.map((r) => (
+            {sortedRates.map((r) => (
               <Tr key={r.id}>
-                <Td className="tabular">{Number(r.cj_base_fee).toLocaleString()}원</Td>
+                <Td className="font-medium text-slate-900 dark:text-slate-100">{r.cj_type}</Td>
                 <Td className="tabular font-medium text-slate-900 dark:text-slate-100">
                   {Number(r.contract_price).toLocaleString()}원
                 </Td>
@@ -122,7 +136,7 @@ export default function ShipperRatesPage() {
               </Tr>
             ))}
             {rates.length === 0 && (
-              <EmptyRow colSpan={4}>등록된 구간이 없습니다. 등록 전까지는 원본 CJ운임이 그대로 적용됩니다.</EmptyRow>
+              <EmptyRow colSpan={4}>등록된 타입이 없습니다. 화주사와 계약한 타입별 단가를 등록해두세요.</EmptyRow>
             )}
           </TBody>
         </Table>

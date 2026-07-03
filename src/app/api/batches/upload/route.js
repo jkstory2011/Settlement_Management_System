@@ -1,13 +1,7 @@
 import { NextResponse } from 'next/server'
 import { getSupabaseAdmin } from '@/lib/supabase-server'
 import { parseInvoiceBuffer } from '@/lib/xlsx-parse'
-import {
-  buildShipperIndex,
-  buildTierIndex,
-  resolveShipperId,
-  computeAppliedAmount,
-  getShipperNameCandidate,
-} from '@/lib/shipper-match'
+import { buildShipperIndex, resolveShipperId, computeAppliedAmount, getShipperNameCandidate } from '@/lib/shipper-match'
 import { refreshBatchAggregates } from '@/lib/refresh-aggregates'
 
 export const runtime = 'nodejs'
@@ -64,15 +58,12 @@ export async function POST(request) {
     const buffer = Buffer.from(await file.arrayBuffer())
     const records = parseInvoiceBuffer(buffer, carrier.format_config)
 
-    const [{ data: shippers, error: shipperError }, { data: tiers, error: tierError }] = await Promise.all([
-      supabase.from('shippers').select('id, name, alias, is_active'),
-      supabase.from('shipper_rate_tiers').select('shipper_id, cj_base_fee, contract_price, effective_from'),
-    ])
+    const { data: shippers, error: shipperError } = await supabase
+      .from('shippers')
+      .select('id, name, alias, is_active')
     if (shipperError) throw shipperError
-    if (tierError) throw tierError
 
     const shipperIndex = buildShipperIndex(shippers)
-    const tierIndex = buildTierIndex(tiers)
 
     const rows = records.map((r) => {
       const candidateName = getShipperNameCandidate({
@@ -81,10 +72,7 @@ export async function POST(request) {
         receiverName: r.receiver_name,
       })
       const shipperId = resolveShipperId(candidateName, shipperIndex)
-      const appliedAmount = computeAppliedAmount(
-        { shipperId, baseFee: r.base_fee, otherFee: r.other_fee, totalFee: r.total_fee, pickupDate: r.pickup_date },
-        tierIndex
-      )
+      const appliedAmount = computeAppliedAmount({ totalFee: r.total_fee })
       return {
         batch_id: batchId,
         no: r.no,

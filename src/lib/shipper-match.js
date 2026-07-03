@@ -1,4 +1,9 @@
-// 송화인/받는분 이름 -> 화주사, (화주사, 기본운임구간) -> 계약단가 매칭 유틸
+// 송화인/받는분 이름 -> 화주사 매칭 유틸.
+//
+// shipper_rate_tiers(화주사별 타입/계약단가 참고표)는 라인 단위로 타입(극소/소/중 등)을 판별할 방법이
+// 아직 없어(원본에 타입 정보 없음, 같은 기본운임 금액이 항상 같은 타입을 의미하지도 않음) 자동 매칭에는
+// 쓰지 않는다. computeAppliedAmount는 그래서 항상 원본 총운임(totalFee)을 그대로 적용한다.
+// 품목명 기반 자동 매칭(별도 설계 예정)이 만들어지면 이 자리를 대체한다.
 
 // 예약구분에 따라 화주사가 되는 쪽이 다름: 일반은 송화인, 반품은 받는분이 화주사
 export function getShipperNameCandidate({ reservationType, senderName, receiverName }) {
@@ -17,54 +22,13 @@ export function buildShipperIndex(shippers) {
   return index
 }
 
-export function buildTierIndex(tiers) {
-  // shipperId:cjBaseFee -> [effective_from 오름차순으로 정렬된 tier들]
-  // (라인마다 픽업일이 다르므로 "가장 최근 단가" 하나로는 못 고르고, 매칭 시점에 픽업일 기준으로 골라야 함)
-  const index = new Map()
-  for (const tier of tiers) {
-    const key = `${tier.shipper_id}:${Number(tier.cj_base_fee)}`
-    if (!index.has(key)) index.set(key, [])
-    index.get(key).push(tier)
-  }
-  for (const list of index.values()) {
-    list.sort((a, b) => toTime(a.effective_from) - toTime(b.effective_from))
-  }
-  return index
-}
-
 export function resolveShipperId(senderName, shipperIndex) {
   if (!senderName) return null
   return shipperIndex.get(normalizeName(senderName)) ?? null
 }
 
-export function computeAppliedAmount({ shipperId, baseFee, otherFee, totalFee, pickupDate }, tierIndex) {
-  if (shipperId != null) {
-    const tiers = tierIndex.get(`${shipperId}:${Number(baseFee)}`)
-    const tier = pickEffectiveTier(tiers, pickupDate)
-    if (tier) return Number(tier.contract_price) + Number(otherFee || 0)
-  }
+export function computeAppliedAmount({ totalFee }) {
   return Number(totalFee || 0)
-}
-
-// pickupDate 이전(또는 당일)에 등록된 단가 중 가장 최근 것을 고른다.
-// pickupDate가 없으면(픽업일 누락) 과거 동작대로 가장 최근 단가로 폴백한다.
-function pickEffectiveTier(tiers, pickupDate) {
-  if (!tiers || tiers.length === 0) return null
-  if (!pickupDate) return tiers[tiers.length - 1]
-  const pickupTime = toTime(pickupDate)
-  let picked = null
-  for (const tier of tiers) {
-    if (toTime(tier.effective_from) <= pickupTime) picked = tier
-    else break
-  }
-  return picked
-}
-
-// 원본 날짜값이 항상 'YYYY-MM-DD' 형식이라는 보장이 없어(원본 엑셀 문자열을 그대로 쓰는 경로가 있음)
-// 문자열 비교 대신 실제 시각으로 변환해서 비교한다.
-function toTime(dateValue) {
-  const t = new Date(dateValue).getTime()
-  return Number.isNaN(t) ? 0 : t
 }
 
 function normalizeName(name) {

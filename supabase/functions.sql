@@ -331,31 +331,23 @@ begin
   ) on commit drop;
   truncate tmp_recompute_chunk;
 
+  -- shipper_rate_tiers(화주사별 타입 참고표)는 라인 단위 타입 판별 방법이 없어 여기서 매칭에 쓰지 않는다
+  -- (shipper-match.js 상단 주석 참고). applied_amount는 항상 원본 총운임(total_fee) 그대로 둔다.
   insert into tmp_recompute_chunk (id, shipper_id, new_applied_amount)
   select
     c.id,
     case when c.shipper_manual then c.cur_shipper_id else sn.shipper_id end as final_shipper_id,
-    coalesce(t.contract_price + c.other_fee, c.total_fee)
+    c.total_fee
   from (
-    select il.id, il.base_fee, il.other_fee, il.total_fee, il.shipper_name_candidate,
-           il.shipper_manual, il.shipper_id as cur_shipper_id, il.pickup_date
+    select il.id, il.total_fee, il.shipper_name_candidate,
+           il.shipper_manual, il.shipper_id as cur_shipper_id
     from invoice_lines il
     where il.batch_id = p_batch_id
       and il.id > p_after_id
     order by il.id
     limit p_limit
   ) c
-  left join tmp_shipper_names sn on sn.norm_name = lower(trim(c.shipper_name_candidate))
-  left join lateral (
-    select srt.contract_price
-    from shipper_rate_tiers srt
-    where srt.shipper_id = case when c.shipper_manual then c.cur_shipper_id else sn.shipper_id end
-      and srt.cj_base_fee = c.base_fee
-      -- 집화일 이후 등록된(=그 시점엔 적용되지 않았을) 단가는 제외. 집화일이 없으면 과거 동작대로 최신 단가로 폴백.
-      and (c.pickup_date is null or srt.effective_from <= c.pickup_date)
-    order by srt.effective_from desc
-    limit 1
-  ) t on (case when c.shipper_manual then c.cur_shipper_id else sn.shipper_id end) is not null;
+  left join tmp_shipper_names sn on sn.norm_name = lower(trim(c.shipper_name_candidate));
 
   select max(id), count(*) into v_last_id, v_scanned from tmp_recompute_chunk;
 
@@ -912,4 +904,22 @@ begin
   )
   select max(upd.id), count(*)::integer from upd;
 end;
+$$;
+
+-- 화주사 계약단가 등록 화면에서 "CJ 기본운임(구간)"을 직접 타이핑하지 않고 실제 라인 데이터에
+-- 이미 나타난 값 중에서 고르게 하기 위한 조회 함수. 운임구분(freight_type, 극소/소/중 등) 컬럼값이
+-- 없는 배치도 많아 base_fee 금액만으로 구간을 구분한다.
+create or replace function shipper_base_fee_breakdown(p_shipper_id bigint)
+returns table (
+  base_fee numeric,
+  line_count bigint
+)
+language sql
+stable
+as $$
+  select base_fee, count(*)
+  from invoice_lines
+  where shipper_id = p_shipper_id
+  group by base_fee
+  order by base_fee
 $$;

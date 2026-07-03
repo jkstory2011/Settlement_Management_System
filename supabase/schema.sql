@@ -43,14 +43,17 @@ create table if not exists shippers (
   created_at timestamptz not null default now()
 );
 
+-- 화주사와 실제 계약한 타입별(극소/소/중/대1/대2/이형/취급제한) 단가 참고표.
+-- 원본 CJ 라인의 기본운임 금액과는 무관하다(같은 금액이 항상 같은 타입을 의미하지는 않음이 확인됨).
+-- 자동 매칭에는 쓰이지 않고, 사용자가 원본 내역서를 보고 라인을 직접 수정할 때 참고하는 용도.
 create table if not exists shipper_rate_tiers (
   id bigint generated always as identity primary key,
   shipper_id bigint not null references shippers(id) on delete cascade,
-  cj_base_fee numeric not null,
+  cj_type text not null,
   contract_price numeric not null,
   effective_from date not null default current_date,
   created_at timestamptz not null default now(),
-  unique (shipper_id, cj_base_fee, effective_from)
+  unique (shipper_id, cj_type, effective_from)
 );
 
 create index if not exists idx_shipper_rate_tiers_shipper on shipper_rate_tiers(shipper_id);
