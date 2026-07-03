@@ -948,10 +948,10 @@ export default function BatchDetailPage() {
           </Table>
 
           <div className="mt-3 flex items-center justify-between text-sm text-slate-500 dark:text-slate-400">
-            <span className="tabular">
-              총 {total.toLocaleString()}건 중 {(page - 1) * pageSize + 1}-{Math.min(page * pageSize, total)}
-            </span>
             <div className="flex items-center gap-2">
+              <span className="tabular">
+                총 {total.toLocaleString()}건 중 {(page - 1) * pageSize + 1}-{Math.min(page * pageSize, total)}
+              </span>
               <div className="inline-flex rounded-md border border-slate-200 p-0.5 dark:border-slate-800">
                 {PAGE_SIZE_OPTIONS.map((size) => (
                   <button
@@ -967,6 +967,8 @@ export default function BatchDetailPage() {
                   </button>
                 ))}
               </div>
+            </div>
+            <div className="flex items-center gap-2">
               <Button variant="secondary" disabled={page <= 1} onClick={() => setPage((p) => Math.max(1, p - 1))} className="px-3 py-1">
                 이전
               </Button>
