@@ -12,4 +12,22 @@
   .tabular {
     font-variant-numeric: tabular-nums;
   }
+
+  .thin-scroll {
+    scrollbar-width: thin;
+    scrollbar-color: theme('colors.slate.300') transparent;
+  }
+  .dark .thin-scroll {
+    scrollbar-color: theme('colors.slate.700') transparent;
+  }
+  .thin-scroll::-webkit-scrollbar {
+    width: 5px;
+  }
+  .thin-scroll::-webkit-scrollbar-thumb {
+    background: theme('colors.slate.300');
+    border-radius: 9999px;
+  }
+  .dark .thin-scroll::-webkit-scrollbar-thumb {
+    background: theme('colors.slate.700');
+  }
 }
