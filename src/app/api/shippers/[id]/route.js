@@ -17,6 +17,17 @@ export async function PATCH(request, { params }) {
   if (body.contact !== undefined) update.contact = body.contact || null
   if (body.memo !== undefined) update.memo = body.memo || null
   if (body.is_active !== undefined) update.is_active = Boolean(body.is_active)
+  if (body.bundle_pattern !== undefined) {
+    const pattern = body.bundle_pattern?.trim() || null
+    if (pattern) {
+      try {
+        new RegExp(pattern)
+      } catch {
+        return NextResponse.json({ error: '합포장 판별 정규식이 올바르지 않습니다.' }, { status: 400 })
+      }
+    }
+    update.bundle_pattern = pattern
+  }
 
   const { data, error } = await supabase.from('shippers').update(update).eq('id', id).select().single()
   if (error) return NextResponse.json({ error: error.message }, { status: 500 })

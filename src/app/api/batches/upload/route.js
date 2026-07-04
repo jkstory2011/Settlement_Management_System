@@ -1,7 +1,15 @@
 import { NextResponse } from 'next/server'
 import { getSupabaseAdmin } from '@/lib/supabase-server'
 import { parseInvoiceBuffer } from '@/lib/xlsx-parse'
-import { buildShipperIndex, resolveShipperId, computeAppliedAmount, getShipperNameCandidate } from '@/lib/shipper-match'
+import {
+  buildShipperIndex,
+  buildItemPriceIndex,
+  buildBundlePatternIndex,
+  resolveShipperId,
+  computeAppliedAmount,
+  isBundled,
+  getShipperNameCandidate,
+} from '@/lib/shipper-match'
 import { refreshBatchAggregates } from '@/lib/refresh-aggregates'
 
 export const runtime = 'nodejs'
@@ -58,12 +66,16 @@ export async function POST(request) {
     const buffer = Buffer.from(await file.arrayBuffer())
     const records = parseInvoiceBuffer(buffer, carrier.format_config)
 
-    const { data: shippers, error: shipperError } = await supabase
-      .from('shippers')
-      .select('id, name, alias, is_active')
+    const [{ data: shippers, error: shipperError }, { data: itemPrices, error: itemPriceError }] = await Promise.all([
+      supabase.from('shippers').select('id, name, alias, is_active, bundle_pattern'),
+      supabase.from('shipper_item_prices').select('shipper_id, item_name, contract_price'),
+    ])
     if (shipperError) throw shipperError
+    if (itemPriceError) throw itemPriceError
 
     const shipperIndex = buildShipperIndex(shippers)
+    const itemPriceIndex = buildItemPriceIndex(itemPrices)
+    const bundlePatternIndex = buildBundlePatternIndex(shippers)
 
     const rows = records.map((r) => {
       const candidateName = getShipperNameCandidate({
@@ -72,7 +84,7 @@ export async function POST(request) {
         receiverName: r.receiver_name,
       })
       const shipperId = resolveShipperId(candidateName, shipperIndex)
-      const appliedAmount = computeAppliedAmount({ totalFee: r.total_fee })
+      const appliedAmount = computeAppliedAmount({ shipperId, itemName: r.item_name, baseFee: r.base_fee }, itemPriceIndex)
       return {
         batch_id: batchId,
         no: r.no,
@@ -94,11 +106,14 @@ export async function POST(request) {
         total_fee: r.total_fee,
         shipper_id: shipperId,
         applied_amount: appliedAmount,
+        // final_amount는 생성 컬럼이 아니라 일반 컬럼이라(전체 테이블 재작성 없이 공식을 바꾸려고
+        // 전환함) 여기서 직접 계산해서 넣는다: 최종금액 = 적용금액(기타운임 제외) + 기타운임.
+        final_amount: appliedAmount + Number(r.other_fee || 0),
         receiver_signee: r.receiver_signee,
         delivery_date: r.delivery_date,
         delivery_branch: r.delivery_branch,
-        // 품목명에 '$'로 여러 품목이 이어져 있으면 합포장(한 박스에 여러 품목을 묶어 보낸 건)
-        is_bundled: (r.item_name || '').includes('$'),
+        // 합포장(한 박스에 여러 품목을 묶어 보낸 건) 판별 방식은 화주사마다 다르다.
+        is_bundled: isBundled(r.item_name, bundlePatternIndex.get(shipperId)),
       }
     })
 

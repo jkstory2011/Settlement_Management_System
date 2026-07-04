@@ -250,9 +250,12 @@ begin
   into v_batch_id, v_shipper_id, v_candidate, v_reservation_type, v_old_final
   from invoice_lines il where il.id = p_line_id;
 
+  -- final_amount는 더 이상 생성 컬럼이 아니라(전체 재작성 없이 빠르게 바꾸려고 일반 컬럼으로 전환),
+  -- 여기서 직접 계산해서 넣는다: 최종금액 = coalesce(manual_amount, applied_amount) + 기타운임.
   update invoice_lines il
   set manual_amount = p_manual_amount,
-      is_manual_edit = (p_manual_amount is not null)
+      is_manual_edit = (p_manual_amount is not null),
+      final_amount = coalesce(p_manual_amount, il.applied_amount) + il.other_fee
   where il.id = p_line_id
   returning il.final_amount into v_new_final;
 
@@ -331,15 +334,18 @@ begin
   ) on commit drop;
   truncate tmp_recompute_chunk;
 
-  -- shipper_rate_tiers(화주사별 타입 참고표)는 라인 단위 타입 판별 방법이 없어 여기서 매칭에 쓰지 않는다
-  -- (shipper-match.js 상단 주석 참고). applied_amount는 항상 원본 총운임(total_fee) 그대로 둔다.
+  -- shipper_rate_tiers(화주사별 타입 참고표)는 라인 단위 타입 판별 방법이 없어 매칭에 쓰지 않는다
+  -- (shipper-match.js 상단 주석 참고). 대신 shipper_item_prices((화주사, 품목명) -> 계약단가,
+  -- 과거 완성 정산 파일에서 추출)로 매칭한다. 못 찾으면 원본 기본운임(base_fee) 그대로 둔다.
+  -- applied_amount는 기타운임을 뺀 "보정된 기본운임"이고, final_amount(생성 컬럼)가 항상
+  -- applied_amount + other_fee를 계산하므로 여기서 other_fee를 더하면 안 된다(이중 계산 방지).
   insert into tmp_recompute_chunk (id, shipper_id, new_applied_amount)
   select
     c.id,
     case when c.shipper_manual then c.cur_shipper_id else sn.shipper_id end as final_shipper_id,
-    c.total_fee
+    coalesce(sip.contract_price, c.base_fee)
   from (
-    select il.id, il.total_fee, il.shipper_name_candidate,
+    select il.id, il.base_fee, il.item_name, il.shipper_name_candidate,
            il.shipper_manual, il.shipper_id as cur_shipper_id
     from invoice_lines il
     where il.batch_id = p_batch_id
@@ -347,13 +353,17 @@ begin
     order by il.id
     limit p_limit
   ) c
-  left join tmp_shipper_names sn on sn.norm_name = lower(trim(c.shipper_name_candidate));
+  left join tmp_shipper_names sn on sn.norm_name = lower(trim(c.shipper_name_candidate))
+  left join shipper_item_prices sip
+    on sip.shipper_id = case when c.shipper_manual then c.cur_shipper_id else sn.shipper_id end
+    and sip.item_name = trim(c.item_name);
 
   select max(id), count(*) into v_last_id, v_scanned from tmp_recompute_chunk;
 
   update invoice_lines il
   set shipper_id = tmp.shipper_id,
-      applied_amount = tmp.new_applied_amount
+      applied_amount = tmp.new_applied_amount,
+      final_amount = coalesce(il.manual_amount, tmp.new_applied_amount) + il.other_fee
   from tmp_recompute_chunk tmp
   where il.id = tmp.id
     and (il.shipper_id is distinct from tmp.shipper_id or il.applied_amount is distinct from tmp.new_applied_amount);
@@ -395,16 +405,10 @@ begin
   truncate tmp_assign_after;
 
   with computed as (
-    select il.id, il.reservation_type, coalesce(t.contract_price + il.other_fee, il.total_fee) as new_applied
+    select il.id, il.reservation_type, coalesce(sip.contract_price, il.base_fee) as new_applied
     from invoice_lines il
-    left join lateral (
-      select srt.contract_price
-      from shipper_rate_tiers srt
-      where srt.shipper_id = p_shipper_id and srt.cj_base_fee = il.base_fee
-        and (il.pickup_date is null or srt.effective_from <= il.pickup_date)
-      order by srt.effective_from desc
-      limit 1
-    ) t on true
+    left join shipper_item_prices sip
+      on sip.shipper_id = p_shipper_id and sip.item_name = trim(il.item_name)
     where il.batch_id = p_batch_id
       and il.shipper_id is null
       and il.shipper_name_candidate = p_candidate_name
@@ -412,7 +416,8 @@ begin
   upd as (
     update invoice_lines il
     set shipper_id = p_shipper_id,
-        applied_amount = c.new_applied
+        applied_amount = c.new_applied,
+        final_amount = coalesce(il.manual_amount, c.new_applied) + il.other_fee
     from computed c
     where il.id = c.id
     returning il.reservation_type, il.applied_amount, il.final_amount
@@ -515,7 +520,8 @@ begin
   with upd as (
     update invoice_lines
     set shipper_id = null,
-        applied_amount = total_fee,
+        applied_amount = base_fee,
+        final_amount = coalesce(manual_amount, base_fee) + other_fee,
         -- 리셋 안 하면 이 라인은 향후 재계산에서 이름매칭 대상에서 영구히 제외됨(shipper_manual=true가 계속 우선함)
         shipper_manual = false
     where batch_id = p_batch_id and shipper_id = p_shipper_id and shipper_name_candidate = p_candidate_name
@@ -643,20 +649,17 @@ begin
   ),
   computed as (
     select il.id as line_id, n.shipper_id,
-      coalesce(t.contract_price + il.other_fee, il.total_fee) as new_applied_amount
+      coalesce(sip.contract_price, il.base_fee) as new_applied_amount
     from invoice_lines il
     left join names n on n.norm_name = lower(trim(il.shipper_name_candidate))
-    left join lateral (
-      select srt.contract_price from shipper_rate_tiers srt
-      where srt.shipper_id = n.shipper_id and srt.cj_base_fee = il.base_fee
-        and (il.pickup_date is null or srt.effective_from <= il.pickup_date)
-      order by srt.effective_from desc limit 1
-    ) t on n.shipper_id is not null
+    left join shipper_item_prices sip
+      on sip.shipper_id = n.shipper_id and sip.item_name = trim(il.item_name)
     where il.id = any(p_line_ids)
   )
   update invoice_lines il
   set shipper_id = c.shipper_id,
       applied_amount = c.new_applied_amount,
+      final_amount = coalesce(il.manual_amount, c.new_applied_amount) + il.other_fee,
       shipper_manual = false
   from computed c
   where il.id = c.line_id;
@@ -858,19 +861,19 @@ begin
     having count(distinct g_shipper_id) = 1
   )
   select m.id, m.shipper_id,
-    coalesce(t.contract_price + m.other_fee, m.total_fee)
+    coalesce(sip.contract_price, m.base_fee)
   from matched m
-  left join lateral (
-    select srt.contract_price from shipper_rate_tiers srt
-    where srt.shipper_id = m.shipper_id and srt.cj_base_fee = m.base_fee
-      and (m.pickup_date is null or srt.effective_from <= m.pickup_date)
-    order by srt.effective_from desc limit 1
-  ) t on true;
+  join invoice_lines il2 on il2.id = m.id
+  left join shipper_item_prices sip
+    on sip.shipper_id = m.shipper_id and sip.item_name = trim(il2.item_name);
 
   select count(*) into v_matched from tmp_match_staging;
 
   update invoice_lines il
-  set shipper_id = s.shipper_id, applied_amount = s.new_applied_amount, shipper_manual = true
+  set shipper_id = s.shipper_id,
+      applied_amount = s.new_applied_amount,
+      final_amount = coalesce(il.manual_amount, s.new_applied_amount) + il.other_fee,
+      shipper_manual = true
   from tmp_match_staging s
   where il.id = s.id;
 
@@ -886,23 +889,44 @@ $$;
 
 -- is_bundled 컬럼을 나중에(기존 행이 이미 있는 상태에서) 추가했을 때 한 번 돌린 백필용 함수.
 -- 신규 업로드는 upload API가 매번 is_bundled를 직접 계산해서 넣으므로 평소엔 호출되지 않는다.
+-- 합포장 판별 방식은 화주사마다 다르다(shippers.bundle_pattern, 없으면 기본값 '\$').
+-- 신규 업로드는 upload API가 매번 화주사별 규칙으로 is_bundled를 계산해서 넣으므로, 이 함수는
+-- 화주사의 bundle_pattern이 나중에 바뀌었을 때(과거 배치까지 다시 반영) 한 번씩 돌리는 용도다.
+-- updated_count(값이 실제로 바뀐 행)만으로 페이지네이션 커서를 잡으면, 한 청크 안의 값이 전부
+-- 이미 맞는 경우 last_id가 null이 되어 중간에 멈추므로 scanned_count를 별도로 반환한다.
 create or replace function backfill_is_bundled_chunk(p_after_id bigint, p_limit integer default 20000)
-returns table (last_id bigint, updated_count integer)
+returns table (last_id bigint, scanned_count integer, updated_count integer)
 language plpgsql
 as $$
+declare
+  v_last_id bigint;
+  v_scanned integer;
+  v_updated integer;
 begin
-  return query
-  with chunk as (
-    select id from invoice_lines where id > p_after_id order by id limit p_limit
-  ),
-  upd as (
-    update invoice_lines il
-    set is_bundled = (il.item_name like '%$%')
-    from chunk c
-    where il.id = c.id
-    returning il.id
-  )
-  select max(upd.id), count(*)::integer from upd;
+  create temporary table if not exists tmp_bundle_chunk (
+    id bigint primary key,
+    new_is_bundled boolean
+  ) on commit drop;
+  truncate tmp_bundle_chunk;
+
+  insert into tmp_bundle_chunk (id, new_is_bundled)
+  select il.id, (il.item_name ~ coalesce(s.bundle_pattern, '\$'))
+  from invoice_lines il
+  left join shippers s on s.id = il.shipper_id
+  where il.id > p_after_id
+  order by il.id
+  limit p_limit;
+
+  select max(id), count(*) into v_last_id, v_scanned from tmp_bundle_chunk;
+
+  update invoice_lines il
+  set is_bundled = tmp.new_is_bundled
+  from tmp_bundle_chunk tmp
+  where il.id = tmp.id
+    and il.is_bundled is distinct from tmp.new_is_bundled;
+  get diagnostics v_updated = row_count;
+
+  return query select v_last_id, v_scanned, v_updated;
 end;
 $$;
 
@@ -922,4 +946,65 @@ as $$
   where shipper_id = p_shipper_id
   group by base_fee
   order by base_fee
+$$;
+
+-- 대시보드 "최근 업로드 배치" 표에 금액대별 수량을 보여주기 위한 배치 단위 집계.
+create or replace function batch_base_fee_breakdown(p_batch_id bigint)
+returns table (
+  base_fee numeric,
+  line_count bigint
+)
+language sql
+stable
+as $$
+  select base_fee, count(*)
+  from invoice_lines
+  where batch_id = p_batch_id
+  group by base_fee
+  order by base_fee
+$$;
+
+-- shipper_item_prices는 완전 일치하는 품목명만 자동 적용한다(오매칭 방지). 이 함수는 "적용 안 된
+-- 라인"의 품목명 중, 같은 화주사의 참조표에서 서로 접두어 관계인(품질보증 문구가 뒤에 더 붙는 등)
+-- 후보가 있는 것만 골라서 사람이 확인 후 승인하게 하기 위한 조회용이다. 자동으로 적용하지 않는다.
+-- 배치 전체(21만 건)를 한 번에 훑으면 8초 statement_timeout에 걸려서(실측 8.9초), 화면에서 화주사
+-- 하나를 고른 뒤 그 화주사 범위로만 조회하도록 화주사 단위로 스코프를 좁혔다.
+create or replace function batch_unmatched_item_candidates(p_batch_id bigint, p_shipper_id bigint)
+returns table (
+  item_name text,
+  line_count bigint,
+  candidate_item_name text,
+  candidate_contract_price numeric
+)
+language sql
+stable
+as $$
+  with unmatched as (
+    select il.item_name, count(*) as line_count
+    from invoice_lines il
+    where il.batch_id = p_batch_id
+      and il.shipper_id = p_shipper_id
+      and il.applied_amount = il.base_fee
+    group by il.item_name
+  )
+  select
+    u.item_name,
+    u.line_count,
+    cand.item_name,
+    cand.contract_price
+  from unmatched u
+  join lateral (
+    select sip.item_name, sip.contract_price
+    from shipper_item_prices sip
+    where sip.shipper_id = p_shipper_id
+      and sip.item_name <> u.item_name
+      and (
+        position(sip.item_name in u.item_name) = 1
+        or position(u.item_name in sip.item_name) = 1
+      )
+    order by length(sip.item_name) desc
+    limit 1
+  ) cand on true
+  order by u.line_count desc
+  limit 200
 $$;

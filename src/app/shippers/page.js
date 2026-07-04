@@ -57,6 +57,20 @@ export default function ShippersPage() {
     load()
   }
 
+  async function saveBundlePattern(shipper, value) {
+    const res = await fetch(`/api/shippers/${shipper.id}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ bundle_pattern: value }),
+    })
+    const json = await res.json()
+    if (!res.ok) {
+      alert(json.error || '저장 실패')
+      return
+    }
+    load()
+  }
+
   async function remove(shipper) {
     if (!confirm(`${shipper.name} 화주사를 삭제할까요? 등록된 구간표도 함께 삭제됩니다.`)) return
     const res = await fetch(`/api/shippers/${shipper.id}`, { method: 'DELETE' })
@@ -102,6 +116,7 @@ export default function ShippersPage() {
             <Th>화주사명</Th>
             <Th>별칭</Th>
             <Th>연락처</Th>
+            <Th>합포장 판별 정규식</Th>
             <Th>상태</Th>
             <Th>구간표</Th>
             <Th></Th>
@@ -112,6 +127,18 @@ export default function ShippersPage() {
                 <Td className="font-medium text-slate-900 dark:text-slate-200">{s.name}</Td>
                 <Td className="text-slate-500 dark:text-slate-500">{(s.alias || []).join(', ')}</Td>
                 <Td className="text-slate-500 dark:text-slate-500">{s.contact}</Td>
+                <Td>
+                  <Input
+                    key={s.bundle_pattern || 'default'}
+                    className="w-40 text-xs"
+                    defaultValue={s.bundle_pattern || ''}
+                    placeholder="기본값: $ 포함"
+                    onBlur={(e) => {
+                      const value = e.target.value.trim()
+                      if (value !== (s.bundle_pattern || '')) saveBundlePattern(s, value)
+                    }}
+                  />
+                </Td>
                 <Td>
                   <button
                     onClick={() => toggleActive(s)}
@@ -136,7 +163,7 @@ export default function ShippersPage() {
                 </Td>
               </Tr>
             ))}
-            {shippers.length === 0 && <EmptyRow colSpan={6}>등록된 화주사가 없습니다.</EmptyRow>}
+            {shippers.length === 0 && <EmptyRow colSpan={7}>등록된 화주사가 없습니다.</EmptyRow>}
           </TBody>
         </Table>
       )}

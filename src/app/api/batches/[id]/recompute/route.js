@@ -6,7 +6,9 @@ export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
 export const maxDuration = 300
 
-const CHUNK_SIZE = 20000
+// shipper_item_prices 조인이 추가된 뒤 20,000행 청크가 8초 statement_timeout에 걸려서 줄임
+// (4,000행 기준 약 1.2초 확인됨).
+const CHUNK_SIZE = 4000
 
 // 화주사/구간표가 업로드 이후에 바뀐 경우, 해당 배치의 shipper_id/applied_amount를 다시 계산한다.
 // 수동 수정(manual_amount)은 건드리지 않는다. DB statement_timeout을 피하기 위해 청크 단위로 여러 번 호출한다.

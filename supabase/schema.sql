@@ -40,6 +40,9 @@ create table if not exists shippers (
   contact text,
   memo text,
   is_active boolean not null default true,
+  -- 합포장(묶음배송) 판별용 정규식. 화주사마다 품목명에 표시하는 방식이 다름이 확인됨
+  -- (예: 기본은 "$" 포함 여부, 비전스토리는 "품목명(수량) +" 패턴). null이면 기본값("\$") 사용.
+  bundle_pattern text,
   created_at timestamptz not null default now()
 );
 
@@ -55,6 +58,22 @@ create table if not exists shipper_rate_tiers (
   created_at timestamptz not null default now(),
   unique (shipper_id, cj_type, effective_from)
 );
+
+-- 화주사별 (품목명 -> 계약단가) 자동 매칭표. 화주사가 완성해둔 과거 정산 파일(원본 기본운임과
+-- 직접 계산한 변경운임이 함께 있는 파일)에서 추출한다. 원본 CJ 기본운임은 같아도 품목명에 따라
+-- 실제 계약단가가 달라짐이 확인됐고(예: 3HKOREA 기본운임 1,750원이 품목에 따라 1,950/2,500/4,600원
+-- 등으로 다르게 적용됨), 반대로 (화주사, 품목명) 조합은 대부분(94~100%) 하나의 단가로 일관됨을
+-- 검증했다. 처음 보는 품목명은 매칭되지 않고 원본 총운임(total_fee) 그대로 적용된다.
+create table if not exists shipper_item_prices (
+  id bigint generated always as identity primary key,
+  shipper_id bigint not null references shippers(id) on delete cascade,
+  item_name text not null,
+  contract_price numeric not null,
+  updated_at timestamptz not null default now(),
+  unique (shipper_id, item_name)
+);
+
+create index if not exists idx_shipper_item_prices_shipper on shipper_item_prices(shipper_id);
 
 create index if not exists idx_shipper_rate_tiers_shipper on shipper_rate_tiers(shipper_id);
 
@@ -105,7 +124,9 @@ create table if not exists invoice_lines (
   shipper_manual boolean not null default false,
   is_manual_edit boolean not null default false,
   manual_amount numeric,
-  final_amount numeric generated always as (coalesce(manual_amount, applied_amount)) stored,
+  -- 적용금액(applied_amount)은 기타운임을 뺀 "보정된 기본운임"이므로, 최종금액은 항상
+  -- 적용금액 + 기타운임이다(수동 수정된 경우도 manual_amount가 적용금액 자리를 대신할 뿐 동일 공식).
+  final_amount numeric generated always as (coalesce(manual_amount, applied_amount) + other_fee) stored,
   receiver_signee text,
   delivery_date date,
   delivery_branch text,

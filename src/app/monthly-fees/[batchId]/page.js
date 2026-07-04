@@ -9,6 +9,7 @@ import PageHeader from '@/components/ui/PageHeader'
 import { Input } from '@/components/ui/Input'
 import { Table, THead, Th, TBody, Tr, Td, EmptyRow } from '@/components/ui/Table'
 import StatementsTab from './StatementsTab'
+import UnmatchedItemsTab from './UnmatchedItemsTab'
 
 const LINES_COL_STORAGE_KEY = 'monthly-fees-lines-col-widths'
 const PAGE_SIZE_STORAGE_KEY = 'monthly-fees-lines-page-size'
@@ -63,7 +64,17 @@ function ResizeHandle({ onResize }) {
 // 각 상품명 끝의 *숫자 / *숫자개 가 그 상품의 실제 수량을 뜻한다(없으면 1개).
 // "made*" 같은 장식용 *는 끝에 숫자가 오지 않으므로 걸러진다.
 // 상품 종류 수와 실제 총 수량이 다를 수 있어 둘 다 계산한다.
-function bundleLabel(itemName) {
+// 합포장 표시 방식이 화주사마다 달라(기본은 품목명을 '$'로 이어붙임, 비전스토리는 "품목명(수량) +"로
+// 이어붙임) bundlePattern이 기본값이 아니면 "(수량)" 표기를 직접 세는 방식으로 계산한다.
+function bundleLabel(itemName, bundlePattern) {
+  if (bundlePattern) {
+    const matches = [...itemName.matchAll(/\((\d+)\s*개?\)/g)]
+    if (matches.length > 0) {
+      const qty = matches.reduce((sum, m) => sum + Number(m[1]), 0)
+      return matches.length === qty ? `${qty}개` : `${matches.length}종 · ${qty}개`
+    }
+  }
+
   const segments = itemName.split('$').flatMap((seg) => seg.split('，'))
   let qty = 0
   for (const seg of segments) {
@@ -271,18 +282,21 @@ export default function BatchDetailPage() {
     const params = new URLSearchParams({ page: String(page), pageSize: String(pageSize), ...fParams })
     if (q) params.set('q', q)
 
-    const summaryQuery = new URLSearchParams(fParams).toString()
-
-    const [linesRes, summaryRes] = await Promise.all([
-      fetch(`/api/batches/${batchId}/lines?${params.toString()}`),
-      fetch(`/api/batches/${batchId}/summary${summaryQuery ? `?${summaryQuery}` : ''}`),
-    ])
+    const [linesRes] = await Promise.all([fetch(`/api/batches/${batchId}/lines?${params.toString()}`), refreshSummary()])
     const linesJson = await linesRes.json()
-    const summaryJson = await summaryRes.json()
     setLines(linesJson.lines || [])
     setTotal(linesJson.total || 0)
-    setSummary(summaryJson.summary)
     setLoading(false)
+  }
+
+  // 라인 목록(최대 1000건)까지 다시 안 불러오고 합계 KPI만 가볍게 갱신할 때 쓴다
+  // (건별 수정처럼 이미 화면에 반영된 값을 굳이 다시 통째로 불러올 필요가 없는 경우).
+  async function refreshSummary() {
+    const fParams = filterParams()
+    const summaryQuery = new URLSearchParams(fParams).toString()
+    const summaryRes = await fetch(`/api/batches/${batchId}/summary${summaryQuery ? `?${summaryQuery}` : ''}`)
+    const summaryJson = await summaryRes.json()
+    setSummary(summaryJson.summary)
   }
 
   useEffect(() => {
@@ -388,7 +402,7 @@ export default function BatchDetailPage() {
     if (res.ok) {
       setLines((prev) => prev.map((l) => (l.id === line.id ? { ...l, ...json.line } : l)))
       setEditingId(null)
-      loadLines()
+      refreshSummary()
     }
   }
 
@@ -442,6 +456,7 @@ export default function BatchDetailPage() {
           { value: 'lines', label: '라인 조회' },
           { value: 'shippers', label: '화주사별 건수' },
           { value: 'statements', label: '정산서 발행' },
+          { value: 'unmatched', label: '미확인 후보' },
         ].map((tab) => (
           <button
             key={tab.value}
@@ -622,6 +637,8 @@ export default function BatchDetailPage() {
       )}
 
       {activeTab === 'statements' && <StatementsTab batchId={batchId} />}
+
+      {activeTab === 'unmatched' && <UnmatchedItemsTab batchId={batchId} />}
 
       {activeTab === 'lines' && (
         <section>
@@ -895,15 +912,13 @@ export default function BatchDetailPage() {
                   <Td className="overflow-hidden text-ellipsis" title={l.item_name}>
                     {l.is_bundled && (
                       <span className="mr-1 rounded bg-violet-50 px-1.5 py-0.5 text-[10px] text-violet-600 dark:bg-violet-500/10 dark:text-violet-400">
-                        합포장 {bundleLabel(l.item_name)}
+                        합포장 {bundleLabel(l.item_name, shippers.find((s) => s.id === l.shipper_id)?.bundle_pattern)}
                       </span>
                     )}
                     {l.item_name}
                   </Td>
                   <Td className="tabular text-right">{l.qty}</Td>
                   <Td className="tabular text-right text-slate-500 dark:text-slate-500">{Number(l.total_fee).toLocaleString()}</Td>
-                  <Td className="tabular text-right">{Number(l.applied_amount).toLocaleString()}</Td>
-                  <Td className="tabular text-right text-slate-500 dark:text-slate-500">{Number(l.other_fee).toLocaleString()}</Td>
                   <Td className="tabular text-right font-medium">
                     {editingId === l.id ? (
                       <Input
@@ -915,9 +930,13 @@ export default function BatchDetailPage() {
                       />
                     ) : (
                       <span className={l.is_manual_edit ? 'text-amber-600 dark:text-amber-400' : ''}>
-                        {Number(l.final_amount).toLocaleString()}
+                        {Number(l.manual_amount ?? l.applied_amount).toLocaleString()}
                       </span>
                     )}
+                  </Td>
+                  <Td className="tabular text-right text-slate-500 dark:text-slate-500">{Number(l.other_fee).toLocaleString()}</Td>
+                  <Td className="tabular text-right text-slate-500 dark:text-slate-500">
+                    {Number(l.final_amount).toLocaleString()}
                   </Td>
                   <Td className="text-right">
                     {editingId === l.id ? (
