@@ -6,8 +6,9 @@ import ThemeToggle from './ThemeToggle'
 
 const NAV_ITEMS = [
   { href: '/', label: '대시보드', icon: DashboardIcon },
+  { href: '/upload', label: '데이터 업로드', icon: UploadIcon },
   { href: '/monthly-fees', label: '월 택배운임 수정', icon: TruckIcon },
-  { href: '/carriers', label: '택배사 양식 관리', icon: SlidersIcon },
+  { href: '/carriers', label: '택배사 정산양식 관리', icon: SlidersIcon },
   { href: '/shippers', label: '화주사 관리', icon: BuildingIcon },
 ]
 
@@ -54,6 +55,15 @@ function DashboardIcon(props) {
       <rect x="11" y="3" width="6" height="6" rx="1" />
       <rect x="3" y="11" width="6" height="6" rx="1" />
       <rect x="11" y="11" width="6" height="6" rx="1" />
+    </svg>
+  )
+}
+
+function UploadIcon(props) {
+  return (
+    <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.6" {...props}>
+      <path d="M10 13V3M10 3l-3.5 3.5M10 3l3.5 3.5" strokeLinecap="round" strokeLinejoin="round" />
+      <path d="M3 13v2.5A1.5 1.5 0 0 0 4.5 17h11a1.5 1.5 0 0 0 1.5-1.5V13" strokeLinecap="round" strokeLinejoin="round" />
     </svg>
   )
 }

@@ -2,116 +2,30 @@
 
 import { useEffect, useState } from 'react'
 import Link from 'next/link'
-import Card from '@/components/ui/Card'
-import Button from '@/components/ui/Button'
 import Badge from '@/components/ui/Badge'
 import PageHeader from '@/components/ui/PageHeader'
-import { Label, Select, Input } from '@/components/ui/Input'
 import { Table, THead, Th, TBody, Tr, Td, EmptyRow } from '@/components/ui/Table'
 
 export default function MonthlyFeesPage() {
-  const [carriers, setCarriers] = useState([])
   const [batches, setBatches] = useState([])
-  const [carrierId, setCarrierId] = useState('')
-  const [yearMonth, setYearMonth] = useState('')
-  const [file, setFile] = useState(null)
-  const [uploading, setUploading] = useState(false)
-  const [error, setError] = useState('')
-  const [progress, setProgress] = useState('')
-
-  async function load() {
-    const [carrierRes, batchRes] = await Promise.all([fetch('/api/carriers'), fetch('/api/batches')])
-    const carrierJson = await carrierRes.json()
-    const batchJson = await batchRes.json()
-    setCarriers(carrierJson.carriers || [])
-    setBatches(batchJson.batches || [])
-    if (!carrierId && carrierJson.carriers?.[0]) setCarrierId(String(carrierJson.carriers[0].id))
-  }
 
   useEffect(() => {
-    load()
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    fetch('/api/batches')
+      .then((res) => res.json())
+      .then((json) => setBatches(json.batches || []))
   }, [])
-
-  async function handleUpload(e) {
-    e.preventDefault()
-    setError('')
-    if (!file || !carrierId || !yearMonth) {
-      setError('택배사, 대상 월, 파일을 모두 선택하세요.')
-      return
-    }
-
-    setUploading(true)
-    setProgress('업로드 및 처리 중... (대용량 파일은 수 분 소요될 수 있습니다)')
-    try {
-      const formData = new FormData()
-      formData.append('file', file)
-      formData.append('carrier_id', carrierId)
-      formData.append('year_month', yearMonth)
-
-      const res = await fetch('/api/batches/upload', { method: 'POST', body: formData })
-      const json = await res.json()
-      if (!res.ok) throw new Error(json.error || '업로드 실패')
-
-      setProgress(`처리 완료: ${json.totalRows.toLocaleString()}건 적재됨`)
-      setFile(null)
-      load()
-    } catch (err) {
-      setError(err.message)
-      setProgress('')
-    } finally {
-      setUploading(false)
-    }
-  }
-
-  const selectedCarrier = carriers.find((c) => String(c.id) === String(carrierId))
-  const isConfigured = selectedCarrier && Object.keys(selectedCarrier.format_config?.columns || {}).length > 0
 
   return (
     <main>
       <PageHeader eyebrow="Settlement Console" title="월 택배운임 수정" backHref="/" backLabel="홈으로" />
 
-      <Card className="mb-6 p-4">
-        <form onSubmit={handleUpload} className="flex flex-wrap items-end gap-3">
-          <div>
-            <Label>택배사</Label>
-            <Select className="w-44" value={carrierId} onChange={(e) => setCarrierId(e.target.value)}>
-              {carriers.map((c) => (
-                <option key={c.id} value={c.id}>
-                  {c.name}
-                </option>
-              ))}
-            </Select>
-          </div>
-          {selectedCarrier && !isConfigured && (
-            <p className="w-full text-sm text-amber-600 dark:text-amber-400">
-              {selectedCarrier.name}의 양식이 아직 등록되지 않았습니다.{' '}
-              <Link href={`/carriers/${selectedCarrier.id}`} className="underline">
-                여기서 먼저 설정하세요
-              </Link>
-              .
-            </p>
-          )}
-          <div>
-            <Label>대상 월</Label>
-            <Input type="month" value={yearMonth} onChange={(e) => setYearMonth(e.target.value)} />
-          </div>
-          <div>
-            <Label>원본 내역서 (xlsx)</Label>
-            <input
-              type="file"
-              accept=".xlsx"
-              className="text-sm text-slate-600 file:mr-3 file:rounded-md file:border-0 file:bg-slate-100 file:px-3 file:py-1.5 file:text-sm file:font-medium file:text-slate-700 hover:file:bg-slate-200 dark:text-slate-400 dark:file:bg-slate-800 dark:file:text-slate-300 dark:hover:file:bg-slate-700"
-              onChange={(e) => setFile(e.target.files?.[0] || null)}
-            />
-          </div>
-          <Button type="submit" disabled={uploading || !isConfigured}>
-            {uploading ? '처리 중...' : '업로드'}
-          </Button>
-          {progress && <p className="w-full text-sm text-slate-500 dark:text-slate-400">{progress}</p>}
-          {error && <p className="w-full text-sm text-rose-600 dark:text-rose-400">{error}</p>}
-        </form>
-      </Card>
+      <p className="mb-4 text-sm text-slate-500 dark:text-slate-400">
+        업로드된 내역서를 선택해서 라인을 조회/수정합니다. 새 내역서 업로드는{' '}
+        <Link href="/upload" className="text-cyan-600 underline dark:text-cyan-400">
+          데이터 업로드
+        </Link>
+        에서 합니다.
+      </p>
 
       <Table>
         <THead>

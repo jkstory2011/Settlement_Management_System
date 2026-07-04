@@ -34,7 +34,7 @@ const DATE_FIELDS = new Set(['pickup_date', 'delivery_date'])
  */
 export function parseInvoiceBuffer(buffer, formatConfig) {
   if (!formatConfig || !formatConfig.columns || Object.keys(formatConfig.columns).length === 0) {
-    throw new Error('이 택배사의 양식(컬럼 매핑)이 아직 등록되지 않았습니다. 택배사 양식 관리에서 먼저 설정하세요.')
+    throw new Error('이 택배사의 양식(컬럼 매핑)이 아직 등록되지 않았습니다. 택배사 정산양식 관리에서 먼저 설정하세요.')
   }
 
   const headerRows = formatConfig.header_rows ?? 2

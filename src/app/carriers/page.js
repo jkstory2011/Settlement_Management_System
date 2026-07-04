@@ -46,7 +46,7 @@ export default function CarriersPage() {
 
   return (
     <main>
-      <PageHeader eyebrow="Settlement Console" title="택배사 양식 관리" backHref="/" backLabel="홈으로" />
+      <PageHeader eyebrow="Settlement Console" title="택배사 정산양식 관리" backHref="/" backLabel="홈으로" />
 
       <p className="mb-4 text-sm text-slate-500 dark:text-slate-400">
         택배사마다 원본 내역서의 컬럼 배치가 다를 수 있습니다. 업로드 전에 각 택배사의 양식(헤더 행 수, 컬럼 번호)을 먼저
